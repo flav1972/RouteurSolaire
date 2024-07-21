@@ -367,6 +367,10 @@ DallasTemperature sensors(&oneWire); // correspondance entreoneWire et le capteu
 dimmerLamp dimmer1(pulsePin1, zeroCrossPin);
 dimmerLamp dimmer2(pulsePin2, zeroCrossPin);
 
+void initOTA(); // déclaré plus bas
+void Task1code( void *);
+void Task2code( void *);
+
 void setup() {
 
   Serial.begin(115200);
