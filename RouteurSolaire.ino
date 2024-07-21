@@ -18,8 +18,12 @@ Merci à Jean-Victor pour l'idée d'optimisation de la gestion des Dimmers
 ///////// CONFIGURATION ///// PARTIE A MODIFIER POUR VOTRE RESEAU //////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "wifi_config.h"
+/*
+le fichichier wifi_config.h doit contenir les 2 lignes suivantes:
 const char* ssid = "xxxxxxxxxxxxx";                            // nom de votre réseau wifi
-const char* password = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";       // mot de passe de votre réseau wifi
+const char* password = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx ";       // mot de passe de votre réseau wifi
+*/
 boolean mqtt = 0;                                              // activer ou désactiver MQTT Mosquitto pour Home Assistant : 0 ou 1
 #define mqtt_server "192.168.1.15"                             // adresse de votre serveur mqtt //
 #define mqtt_user "mosquitto"                                  // utilisateur mqtt //
@@ -376,11 +380,20 @@ void setup() {
   Serial.begin(115200);
   Serial2.begin(38400, SERIAL_8N1, RXD2, TXD2); //PORT DE CONNEXION AVEC LE CAPTEUR JSY-MK-194
   delay(300);
+  Serial.println("Professeur Solaire Starting...");
   u8g2.begin(); // ECRAN OLED
   u8g2.enableUTF8Print(); //nécessaire pour écrire des caractères accentués
   dimmer1.begin(NORMAL_MODE, ON); 
   WiFi.mode(WIFI_STA); //Optional
   WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi ..");
+  delay(2000);
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println(WiFi.localIP());
+  }
+  else {
+    Serial.println("not connected");
+  }
   server.begin();
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
@@ -803,6 +816,10 @@ for(;;){
    if ((WiFi.status() != WL_CONNECTED) && (currentTime-previousTime5 >= 60000)) {
     WiFi.disconnect();
     WiFi.reconnect();
+    Serial.println("reconnecting wifi...");
+    if (WiFi.status() == WL_CONNECTED) {
+       Serial.println(WiFi.localIP());
+    }
     previousTime5 = currentTime;
                                                                                 }
 
