@@ -3,7 +3,6 @@ Merci à Jean-Victor pour l'idée d'optimisation de la gestion des Dimmers
 - 2 sorties 16A / 3000 watts
 - 1 relais on/off
 - 1 serveur web Dash Lite avec On / Off
-- support MQTT Mosquito - Home Assistant
 - heure NTP
 - relay marche forcée : 16A mini
 - marche forcée automatique suivant surplus et par rapport au volume ballon
@@ -24,10 +23,6 @@ le fichichier wifi_config.h doit contenir les 2 lignes suivantes:
 const char* ssid = "xxxxxxxxxxxxx";                            // nom de votre réseau wifi
 const char* password = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx ";       // mot de passe de votre réseau wifi
 */
-boolean mqtt = 0;                                              // activer ou désactiver MQTT Mosquitto pour Home Assistant : 0 ou 1
-#define mqtt_server "192.168.1.15"                             // adresse de votre serveur mqtt //
-#define mqtt_user "mosquitto"                                  // utilisateur mqtt //
-#define mqtt_password "mosquitto"                              // mot de passe mqtt //
 int relayOn = 1000;                                            // puissance du surplus pour déclencher le relay //
 int relayOff = 800;                                            // puissance du surplus pour stopper le relay //
 boolean marcheForceeVol = 0;                                   // marche forcée automatique suivant le volume du ballon : 0 ou 1
@@ -54,7 +49,6 @@ int temperatureEau=50;                                         // réglage de la
 #include <ESPDash.h> // page web Dash  https://github.com/ayushsharma82/ESP-DASH //
 #include <AsyncTCP.h>   //  https://github.com/me-no-dev/AsyncTCP  ///
 #include <ESPAsyncWebServer.h>  // https://github.com/me-no-dev/ESPAsyncWebServer  et https://github.com/bblanchon/ArduinoJson
-#include <PubSubClient.h> //mqtt Home Assistant  https://github.com/knolleary/pubsubclient //
 #include <NTPClient.h> // gestion de l'heure https://github.com/arduino-libraries/NTPClient //
 #include <OneWire.h> // pour capteur de température DS18B20  https://github.com/PaulStoffregen/OneWire
 #include <DallasTemperature.h> // pour capteur de température DS18B20 https://github.com/milesburton/Arduino-Temperature-Control-Library
@@ -73,24 +67,6 @@ NTPClient temps(ntpUDP, "fr.pool.ntp.org", 3600, 60000);
 #define Relay1 13 // relay on/off déclenchement LOW
 #define Relay2 32 // relay 16A mini marche forcée déclenchement LOW 
 
-
-// configuration MQTT Home Assistant //
-
-#define routeur_topic "mosquitto/routeur"
-#define oled_topic "mosquitto/oled/state"
-#define auto_topic "mosquitto/auto/state"
-#define auto_volume_topic "mosquitto/volume/state"
-#define auto_temperature_topic "mosquitto/temperature/state"
-#define degre_topic "mosquitto/degre/state"
-#define will_topic "mosquitto/routeur/state"
-#define horloge_h_topic "mosquitto/horlogeH/state"
-#define horloge_mn_topic "mosquitto/horlogeMN/state"
-#define will_msg "Wemos Sel Deconnecté"
-#define hello_msg "Wemos Sel Connecté
-#define probe_name "ESP_Power1"
-#define will_qos 0
-#define will_retain 0
-String jsontomqtt;
 
 
 byte ByteArray[250];
@@ -143,7 +119,6 @@ boolean oled = 1;                                              // écran Oled al
 
 AsyncWebServer server(80);
 WiFiClient espClient;
-PubSubClient client(espClient);
 ESPDash dashboard(&server);
 Card button(&dashboard, BUTTON_CARD, "Auto / Marche forcée");
 Card horlogeRH(&dashboard, SLIDER_CARD, "Réglage horloge Heure de départ :", "h", 0, 23);
@@ -162,195 +137,6 @@ Card valdim2(&dashboard, PROGRESS_CARD, "sortie 2", "%", 0, 95);
 
 ////////////// Fin connexion wifi //////////
 
-
-//// callback mqtt ///
-
-void callback(String topic, byte *payload, unsigned int length) {
- 
-  Serial.print("Message arrived in topic: ");
-  Serial.println(topic);
-   
- for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
-}
-
- 
-  Serial.println();
-  Serial.println("-----------------------");
-  
-  if (topic=="mosquitto/oled/command")
-     {
-      if ((char)payload[0] == '0') {
-     Serial.println("Oled Off");
-      oled = 0; 
-   } if ((char)payload[0] == '1') {
-     Serial.println("Oled On");
-      oled = 1; 
-   }
-
-     }
-
-  if (topic=="mosquitto/auto/command")
-     {
-      if ((char)payload[0] == '0') {
-     Serial.println("Auto Off");
-      Auto = 0; 
-   } if ((char)payload[0] == '1') {
-     Serial.println("Auto On");
-      Auto = 1;
-   }
-
-     }
-
-  if (topic=="mosquitto/volume/command")
-     {
-      if ((char)payload[0] == '0') {
-     Serial.println("Marche forcée Volume Off");
-      marcheForceeVol = 0; 
-   } if ((char)payload[0] == '1') {
-     Serial.println("Marche forcée Volume On");
-      marcheForceeVol = 1; 
-   }
-
-     }
-  if (topic=="mosquitto/temperature/command")
-     {
-      if ((char)payload[0] == '0') {
-     Serial.println("Marche forcée température Off");
-      marcheForceeTemperature = 0; 
-   } if ((char)payload[0] == '1') {
-     Serial.println("Marche forcée température On");
-     marcheForceeTemperature = 1; 
-  }
-     }
-
-  if (topic=="mosquitto/degre/command")
-     {
-     if((char)payload[0] == '1' && (char)payload[1] == '0'){
-     temperatureEau = 10;             }
-     if((char)payload[0] == '1' && (char)payload[1] == '5'){
-     temperatureEau = 15;             }
-     if((char)payload[0] == '2' && (char)payload[1] == '0'){
-     temperatureEau = 20;             }
-     if((char)payload[0] == '2' && (char)payload[1] == '5'){
-     temperatureEau = 25;             }
-     if((char)payload[0] == '3' && (char)payload[1] == '0'){
-     temperatureEau = 30;             }
-     if((char)payload[0] == '3' && (char)payload[1] == '5'){
-     temperatureEau = 35;             } 
-     if((char)payload[0] == '4' && (char)payload[1] == '0'){
-     temperatureEau = 40;             }
-     if((char)payload[0] == '4' && (char)payload[1] == '5'){
-     temperatureEau = 45;             }
-     if((char)payload[0] == '5' && (char)payload[1] == '0'){
-     temperatureEau = 50;             }
-     if((char)payload[0] == '5' && (char)payload[1] == '5'){
-     temperatureEau = 55;             }
-     if((char)payload[0] == '6' && (char)payload[1] == '0'){
-     temperatureEau = 60;             }
-     if((char)payload[0] == '6' && (char)payload[1] == '5'){
-     temperatureEau = 65;             }
-     if((char)payload[0] == '7' && (char)payload[1] == '0'){
-     temperatureEau = 70;             }
-     if((char)payload[0] == '7' && (char)payload[1] == '5'){
-     temperatureEau = 75;             }
-     if((char)payload[0] == '8' && (char)payload[1] == '0'){
-     temperatureEau = 80;             }
-     if((char)payload[0] == '8' && (char)payload[1] == '5'){
-     temperatureEau = 85;             }
-     if((char)payload[0] == '9' && (char)payload[1] == '0'){
-     temperatureEau = 90;             }
-     }
-
- if (topic=="mosquitto/horlogeH/command")
-     {
-     if((char)payload[0] == '0'){
-     HOn = 0;                   }
-     if((char)payload[0] == '1'){
-     HOn = 1;                   }
-     if((char)payload[0] == '2'){
-     HOn = 2;                   }
-     if((char)payload[0] == '3'){
-     HOn = 3;                   }
-     if((char)payload[0] == '4'){
-     HOn = 4;                   }
-     if((char)payload[0] == '5'){
-     HOn = 5;                   }
-     if((char)payload[0] == '6'){
-     HOn = 6;                   }
-     if((char)payload[0] == '7'){
-     HOn = 7;                   }
-     if((char)payload[0] == '8'){
-     HOn = 8;                   }
-     if((char)payload[0] == '9'){
-     HOn = 9;                   }
-     if((char)payload[0] == '1' && (char)payload[1] == '0'){
-     HOn = 10;                  }
-     if((char)payload[0] == '1' && (char)payload[1] == '1'){
-     HOn = 11;                  }
-     if((char)payload[0] == '1' && (char)payload[1] == '2'){
-     HOn = 12;                  }
-     if((char)payload[0] == '1' && (char)payload[1] == '3'){
-     HOn = 13;                  }
-     if((char)payload[0] == '1' && (char)payload[1] == '4'){
-     HOn = 14;                  }
-     if((char)payload[0] == '1' && (char)payload[1] == '5'){
-     HOn = 15;                  }
-     if((char)payload[0] == '1' && (char)payload[1] == '6'){
-     HOn = 16;                  }
-     if((char)payload[0] == '1' && (char)payload[1] == '7'){
-     HOn = 17;                  }
-     if((char)payload[0] == '1' && (char)payload[1] == '8'){
-     HOn = 18;                  }
-     if((char)payload[0] == '1' && (char)payload[1] == '9'){
-     HOn = 19;                  }
-     if((char)payload[0] == '2' && (char)payload[1] == '0'){
-     HOn = 20;                  }
-     if((char)payload[0] == '2' && (char)payload[1] == '1'){
-     HOn = 21;                  }
-     if((char)payload[0] == '2' && (char)payload[1] == '2'){
-     HOn = 22;                  }
-     if((char)payload[0] == '2' && (char)payload[1] == '3'){
-     HOn = 23;                  }
-     }
-
-
-if (topic=="mosquitto/horlogeMN/command")
-     {
-     if((char)payload[0] == '0'){
-     MnOn = 0;                  }
-     if((char)payload[0] == '1'){
-     MnOn = 1;                  }
-     if((char)payload[0] == '5'){
-     MnOn = 5;                  }
-     if((char)payload[0] == '1' && (char)payload[1] == '0'){
-     MnOn = 10;                 }
-     if((char)payload[0] == '1' && (char)payload[1] == '5'){
-     MnOn = 15;                 }
-     if((char)payload[0] == '2' && (char)payload[1] == '0'){
-     MnOn = 20;                 }
-     if((char)payload[0] == '2' && (char)payload[1] == '5'){
-     MnOn = 25;                 }
-     if((char)payload[0] == '3' && (char)payload[1] == '0'){
-     MnOn = 30;                 }
-     if((char)payload[0] == '3' && (char)payload[1] == '5'){
-     MnOn = 35;                 }
-     if((char)payload[0] == '4' && (char)payload[1] == '0'){
-     MnOn = 40;                 }
-     if((char)payload[0] == '4' && (char)payload[1] == '5'){
-     MnOn = 45;                 }
-     if((char)payload[0] == '5' && (char)payload[1] == '0'){
-     MnOn = 50;                 }
-     if((char)payload[0] == '5' && (char)payload[1] == '5'){
-     MnOn = 55;                 }
-     }
-
-
-
-}
-
-
-//// fin callback ////
 
 
 
@@ -386,8 +172,15 @@ void setup() {
   dimmer1.begin(NORMAL_MODE, ON); 
   WiFi.mode(WIFI_STA); //Optional
   WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi ..");
-  delay(2000);
+  Serial.print("Connecting to WiFi...");
+  for(int i = 5; i >= 0; i--) {
+    delay(1000);
+    if (WiFi.status() == WL_CONNECTED) {
+      break;
+    }
+    Serial.print(i);
+    Serial.print(" ");
+  }
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println(WiFi.localIP());
   }
@@ -395,8 +188,6 @@ void setup() {
     Serial.println("not connected");
   }
   server.begin();
-  client.setServer(mqtt_server, 1883);
-  client.setCallback(callback);
   delay(100);
   temps.begin(); //Intialisation du client NTP
   sensors.begin(); // initialisation du capteur DS18B20
@@ -433,23 +224,6 @@ void setup() {
 }
 
 
-void reconnect() {
-  while (!client.connected()) {
-    
-    if (client.connect(probe_name, mqtt_user, mqtt_password, will_topic, will_qos, will_retain, will_msg)) 
-      {
-        break;
-      } 
-    vTaskDelay(500 / portTICK_PERIOD_MS );
-  }
-  client.subscribe("mosquitto/oled/command");
-  client.subscribe("mosquitto/auto/command");
-  client.subscribe("mosquitto/volume/command");
-  client.subscribe("mosquitto/temperature/command");
-  client.subscribe("mosquitto/degre/command");
-  client.subscribe("mosquitto/horlogeH/command");
-  client.subscribe("mosquitto/horlogeMN/command");
-}
 
 //// marche forcée suivant volume du ballon ///
 
@@ -869,33 +643,6 @@ if (marcheForceeTemperature == 1 && temperatureC > temperatureEau)
 //////////////////////FIN MARCHE FORCEE AUTOMATIQUE PAR TEMPERATURE/////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-
-// Mosquitto //
-if ( currentTime - previousTime2 >= 2000 )
-   {
-   client.loop();
-    if (!client.connected() && mqtt == 1 ) 
-      {
-      reconnect();
-      }
-  previousTime2 = currentTime;
-  jsontomqtt = "{\"consommation\": " + String(ajustePuissance) +" ,\"surplus\": " + String(Power1) +" , \"energie\": " + String(Energy1) +" , \"energieC\": " + String(Energy2) +", \"energytoday\": " + String(EnergyJ) +" , \"temperature\": " + String(temperatureC) +" }";  //
-  client.publish(routeur_topic, (char*) jsontomqtt.c_str(), true);
-  jsontomqtt = "{"+ String(oled) +"}"; 
-  client.publish(oled_topic, jsontomqtt.c_str(), true);
-  jsontomqtt = "{"+ String(Auto) +"}"; 
-  client.publish(auto_topic, jsontomqtt.c_str(), true);
-  jsontomqtt = "{"+ String(marcheForceeVol) +"}"; 
-  client.publish(auto_volume_topic, jsontomqtt.c_str(), true);
-  jsontomqtt = "{"+ String(marcheForceeTemperature) +"}"; 
-  client.publish(auto_temperature_topic, jsontomqtt.c_str(), true);
-  jsontomqtt = String(temperatureEau); 
-  client.publish(degre_topic, jsontomqtt.c_str(), true);
-  jsontomqtt = String(HOn); 
-  client.publish(horloge_h_topic, jsontomqtt.c_str(), true);
-  jsontomqtt = String(MnOn); 
-  client.publish(horloge_mn_topic, jsontomqtt.c_str(), true);
-   }
 
 ///  affichage heure ///
 
