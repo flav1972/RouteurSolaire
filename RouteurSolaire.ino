@@ -983,15 +983,16 @@ if ( currentTime - previousTime2 >= 2000 )
         u8g2.clearBuffer(); // on efface ce qui se trouve déjà dans le buffer
 if (oled == 1)               
   {     u8g2.setFont(u8g2_font_4x6_tf);
-        u8g2.setCursor(25, 10); // position du début du texte
+        u8g2.setCursor(20, 10); // position du début du texte
         u8g2.print("Le Profes'S"); // écriture de texte
         u8g2.setFont(u8g2_font_unifont_t_symbols);
-        u8g2.drawGlyph(70, 13, 0x2600);
+        u8g2.drawGlyph(65, 13, 0x2600);
         u8g2.setFont(u8g2_font_4x6_tf);
-        u8g2.setCursor(81, 10); // position du début du texte
+        u8g2.setCursor(76, 10); // position du début du texte
         u8g2.print("laire  v9.15"); // écriture de texte
         u8g2.drawRFrame(5,15,120,22,11); // rectangle x et y haut gauche / longueur / hauteur / arrondi //
-        u8g2.setCursor(75, 47);
+        u8g2.setFont(u8g2_font_5x7_tf);
+        u8g2.setCursor(20, 47);
         u8g2.print(WiFi.localIP()); // affichage adresse ip //
 
 
