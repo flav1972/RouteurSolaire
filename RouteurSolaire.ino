@@ -1,4 +1,9 @@
-
+/* TODO
+** supression forcage par energie journaliere
+** mette a jour schema pour entre ZC du 2eme triac
+** ajouter forcage par pin et forcage pour une duree
+** ajouter mode AP + STA
+*/
 
 /* Routeur solaire développé par le Profes'Solaire v9.15 - 28-11-2023 - professolaire@gmail.com
 Merci à Jean-Victor pour l'idée d'optimisation de la gestion des Dimmers
