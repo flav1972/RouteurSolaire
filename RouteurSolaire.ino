@@ -1,3 +1,5 @@
+
+
 /* Routeur solaire développé par le Profes'Solaire v9.15 - 28-11-2023 - professolaire@gmail.com
 Merci à Jean-Victor pour l'idée d'optimisation de la gestion des Dimmers
 - 2 sorties 16A / 3000 watts
@@ -27,11 +29,9 @@ int relayOn = 1000;                   // puissance du surplus pour déclencher l
 int relayOff = 800;                   // puissance du surplus pour stopper le relay //
 boolean marcheForceeVol = 0;          // marche forcée automatique suivant le volume du ballon : 0 ou 1
 int volume = 200;                     // volume du ballon en litres
-boolean marcheForceeTemperature = 0;  // marche forcée automatique avec sonde de température DS18B20 (50 degrés) : 0 ou 1
 byte HOn = 01;                        // heure début marche forcée
 byte MnOn = 30;                       // minute début marche forcée
 byte SecOn = 00;                      // sec début marche forcée
-int temperatureEau = 50;              // réglage de la température minimale de l'eau en marche forcée, exemple 50 degrés
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -50,8 +50,6 @@ int temperatureEau = 50;              // réglage de la température minimale de
 #include <AsyncTCP.h>           //  https://github.com/me-no-dev/AsyncTCP  ///
 #include <ESPAsyncWebServer.h>  // https://github.com/me-no-dev/ESPAsyncWebServer  et https://github.com/bblanchon/ArduinoJson
 #include <NTPClient.h>          // gestion de l'heure https://github.com/arduino-libraries/NTPClient //
-#include <OneWire.h>            // pour capteur de température DS18B20  https://github.com/PaulStoffregen/OneWire
-#include <DallasTemperature.h>  // pour capteur de température DS18B20 https://github.com/milesburton/Arduino-Temperature-Control-Library
 #include <ArduinoOTA.h>         // mise à jour OTA par wifi
 
 
@@ -106,7 +104,6 @@ byte HOff;         // heure fin marche forcée
 byte MnOff;        // minute fin marche forcée
 byte SecOff;       // sec fin marche forcée
 char mn00Off[2];   // affichage des mns fin marche forcée au format 0
-int temperatureC;  // temperature ballon
 unsigned long currentTime = 0;
 unsigned long previousTime1 = 0;  // temporisation relai sortie 3
 unsigned long previousTime2 = 0;  // temporisation mqqt
@@ -123,8 +120,6 @@ ESPDash dashboard(&server);
 Card button(&dashboard, BUTTON_CARD, "Auto / Marche forcée");
 Card horlogeRH(&dashboard, SLIDER_CARD, "Réglage horloge Heure de départ :", "h", 0, 23);
 Card horlogeRM(&dashboard, SLIDER_CARD, "Réglage horloge Minute de départ :", "mn", 0, 59);
-Card button2(&dashboard, BUTTON_CARD, "Horloge On/Off température");
-Card temperatureR(&dashboard, SLIDER_CARD, "Réglage température Marche Forcée :", "°C", 0, 99);
 Card button3(&dashboard, BUTTON_CARD, "Horloge On/Off volume");
 Card consommationsurplus(&dashboard, GENERIC_CARD, "surplus / consommation", "Watts");
 Card puissance(&dashboard, GENERIC_CARD, "puissance envoyée au ballon", "Watts");
@@ -150,9 +145,6 @@ const int zeroCrossPin = 35; /* broche utilisée pour le zéro crossing */
 const int pulsePin1 = 25;    /* broche impulsions routage 1*/
 const int pulsePin2 = 26;    /* broche impulsions routage 2*/
 const int oneWireBus = 4;    // broche du capteur DS18B20 //
-
-OneWire oneWire(oneWireBus);          // instance de communication avec le capteur de température
-DallasTemperature sensors(&oneWire);  // correspondance entreoneWire et le capteur Dallas de température
 
 dimmerLamp dimmer1(pulsePin1, zeroCrossPin);
 dimmerLamp dimmer2(pulsePin2, zeroCrossPin);
@@ -189,7 +181,6 @@ void setup() {
   server.begin();
   delay(100);
   temps.begin();    //Intialisation du client NTP
-  sensors.begin();  // initialisation du capteur DS18B20
   pinMode(Relay1, OUTPUT);
   pinMode(Relay2, OUTPUT);
   initOTA();  // initialisation OTA Wifi
@@ -407,13 +398,6 @@ void Task1code(void *pvParameters) {
       Auto = 1;
     }
 
-    if (marcheForceeTemperature == 1 && temperatureC < temperatureEau && temps.getHours() == HOn && temps.getMinutes() == MnOn && temps.getSeconds() == SecOn) {
-      Datas();
-      Auto = 0;
-    }
-
-
-
     if (Auto == 1) {
       digitalWrite(Relay2, LOW);
       Datas();
@@ -602,25 +586,6 @@ void Task2code(void *pvParameters) {
 
     EnergyJ = Energy1 - EnergyInit;
 
-    ////////////////////////////////////////////////////////////////////////////////////////////////
-    ////////////////////////MARCHE FORCEE AUTOMATIQUE PAR TEMPERATURE //////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////
-
-    if (/*marcheForceeTemperature == 1 && */ currentTime - previousTime4 >= 1000) {
-      sensors.requestTemperatures();              // demande de température au capteur //
-      temperatureC = sensors.getTempCByIndex(0);  // température en degrés Celcius
-      previousTime4 = currentTime;
-    }
-
-    if (marcheForceeTemperature == 1 && temperatureC > temperatureEau) {
-      TpsMarcheForcee = 0;
-      Auto = 1;
-    }
-    ////////////////////////////////////////////////////////////////////////////////////////////////
-    //////////////////////FIN MARCHE FORCEE AUTOMATIQUE PAR TEMPERATURE/////////////////////////////
-    ////////////////////////////////////////////////////////////////////////////////////////////////
-
-
     ///  affichage heure ///
 
     //Update de l'heure
@@ -641,12 +606,10 @@ void Task2code(void *pvParameters) {
     valdim1.update(valDim1);
     valdim2.update(valDim2);
     button.update(Auto);
-    button2.update(marcheForceeTemperature);
     button3.update(marcheForceeVol);
     horlogeRH.update(HOn);
     horlogeRM.update(MnOn);
     Oled.update(oled);
-    temperatureR.update(temperatureEau);
     vTaskDelay(60 / portTICK_PERIOD_MS);
     dashboard.sendUpdates();
 
@@ -659,12 +622,6 @@ void Task2code(void *pvParameters) {
     button.attachCallback([&](bool value) {
       Auto = value;
       button.update(Auto);
-      dashboard.sendUpdates();
-    });
-
-    button2.attachCallback([&](bool value) {
-      marcheForceeTemperature = value;
-      button2.update(marcheForceeTemperature);
       dashboard.sendUpdates();
     });
 
@@ -689,13 +646,6 @@ void Task2code(void *pvParameters) {
     horlogeRM.attachCallback([&](int value) {
       MnOn = value;
       horlogeRM.update(MnOn);
-      dashboard.sendUpdates();
-    });
-
-
-    temperatureR.attachCallback([&](int value) {
-      temperatureEau = value;
-      temperatureR.update(temperatureEau);
       dashboard.sendUpdates();
     });
 
@@ -734,10 +684,6 @@ void Task2code(void *pvParameters) {
           u8g2.setCursor(57, 64);
           u8g2.print("Fin : "), u8g2.print(HOff), u8g2.print("h");
           u8g2.print(mn00Off);
-        }
-        if (TpsMarcheForcee == 0 && marcheForceeTemperature == 1) {
-          u8g2.setCursor(90, 64);
-          u8g2.print(temperatureC), u8g2.print("ºC");
         }
         u8g2.sendBuffer();  // l'image qu'on vient de construire est affichée à l'écran
       }
