@@ -74,11 +74,14 @@ float routagePuissance = -30; /* puissance minimale autour du zero */
 int ajustePuissance = 0;      /* Puissance a consommer par le balon (negatif: on doit consommer) */
 float puissanceRoutageOK;
 float pas_dimmer;
+float valDim = 0;             // somme des valeurs des dimmers
 float valDim1 = 0;
 float valDim2 = 0;
-float maxDimmer = 100;
-float maxDimmer2 = 97;
-float minDimmer = 0;
+const float maxDimmer1 = 100;
+const float maxDimmer2 = 97;
+const float minDimmer = 0;
+const float maxDimmers = maxDimmer1 + maxDimmer2;
+
 
 // Donnees de l'amperemetre
 float Voltage;                                         // Tension
@@ -386,66 +389,35 @@ void Task1code(void *pvParameters) {
       pas_dimmer = -0.1;
     }
 
+    valDim = valDim + pas_dimmer;
+    if (valDim > maxDimmers) {
+      valDim = maxDimmers;
+    }
+    else if (valDim < minDimmer) {
+      valDim = minDimmer;
+    }
+
+    valDim1 = min(valDim, maxDimmer1);
+    valDim2 = max(minDimmer, valDim - maxDimmer1);
+
+    if(valDim1 == minDimmer) {
+      dimmer1.setState(OFF);
+    } else {
+      dimmer1.setState(ON);
+    }
+    if(valDim2 == minDimmer) {
+      dimmer2.setState(OFF);
+    } else {
+      dimmer2.setState(ON);
+    }
+    dimmer1.setPower(valDim1);
+    delay(60);
+    dimmer2.setPower(valDim2);
+    delay(60);
+
 
     Serial.print("pas_dimmer: ");
     Serial.print(pas_dimmer);
-
-    // réglages Dimmer 1 ///
-    if(valDim2 <= minDimmer) // seulement si Dimmer2 n'est pas en cours
-      valDim1 = valDim1 + pas_dimmer;
-
-    if (valDim1 <= minDimmer) {
-      dimmer1.setState(OFF);
-      dimmer1.setPower(minDimmer);
-      valDim1 = minDimmer;
-      delay(60);
-    }
-
-    else if (valDim1 >= maxDimmer) {
-      dimmer1.setState(ON);
-      dimmer1.setPower(maxDimmer);
-      valDim1 = maxDimmer;
-      delay(60);
-    }
-
-    else {
-      dimmer1.setState(ON);
-      dimmer1.setPower(valDim1);
-      delay(60);
-    }
-
-    // réglages Dimmer 2 ///
-
-    if (valDim1 >= maxDimmer) {
-
-      valDim2 = valDim2 + pas_dimmer;
-
-      if (valDim2 <= minDimmer) {
-        dimmer2.setState(OFF);
-        dimmer2.setPower(minDimmer);
-        valDim2 = minDimmer;
-        delay(60);
-      }
-
-      else if (valDim2 >= maxDimmer2) {
-        dimmer2.setState(ON);
-        dimmer2.setPower(maxDimmer2);
-        valDim2 = maxDimmer2;
-        delay(60);
-      }
-      else {
-        dimmer2.setState(ON);
-        dimmer2.setPower(valDim2);
-        delay(60);
-      }
-
-    }
-
-    else {
-      valDim2 = minDimmer;
-      dimmer2.setPower(valDim2);
-      dimmer2.setState(OFF);
-    }
 
     Serial.print(" / valDim1: ");
     Serial.print(valDim1);
