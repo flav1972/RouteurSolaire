@@ -57,6 +57,12 @@ byte SecOn = 00;                      // sec début marche forcée
 #include <NTPClient.h>          // gestion de l'heure https://github.com/arduino-libraries/NTPClient //
 #include <ArduinoOTA.h>         // mise à jour OTA par wifi
 
+// Coefficient pour simuler des charges reeles avec des petites charges
+#define CoefSimulation 60.0
+
+#ifndef CoefSimulation
+#define CoefSimulation 1.0
+#endif
 
 WiFiUDP ntpUDP;
 /*
@@ -88,7 +94,8 @@ float puissanceRoutageOK;
 float pas_dimmer;
 float valDim1 = 0;
 float valDim2 = 0;
-float maxDimmer = 95;
+float maxDimmer = 100;
+float maxDimmer2 = 97;
 float minDimmer = 0;
 float Voltage, Intensite1, Energy1, Energy2C, Frequency, PowerFactor1, Intensite2, Energy2, Sens1, Sens2;
 int Power1;                                            // puissance envoyée au ballon
@@ -126,14 +133,14 @@ Card button(&dashboard, BUTTON_CARD, "Auto / Marche forcée");
 Card horlogeRH(&dashboard, SLIDER_CARD, "Réglage horloge Heure de départ :", "h", 0, 23);
 Card horlogeRM(&dashboard, SLIDER_CARD, "Réglage horloge Minute de départ :", "mn", 0, 59);
 Card button3(&dashboard, BUTTON_CARD, "Horloge On/Off volume");
-Card consommationsurplus(&dashboard, GENERIC_CARD, "surplus / consommation", "Watts");
-Card puissance(&dashboard, GENERIC_CARD, "puissance envoyée au ballon", "Watts");
+Card consommationsurplus(&dashboard, GENERIC_CARD, "Surplus (+=injection, -=conso)", "Watts");
+Card puissance(&dashboard, GENERIC_CARD, "Consumation Ballon+Planchers", "Watts");
 Card energy1(&dashboard, GENERIC_CARD, "énergie sauvée totale", "kwh");
 Card energy2C(&dashboard, GENERIC_CARD, "Consommation Enedis totale", "kWh");
 Card energyj(&dashboard, GENERIC_CARD, "énergie sauvée aujourd'hui", "kWh");
 Card Oled(&dashboard, BUTTON_CARD, "Écran On/Off");
-Card valdim1(&dashboard, PROGRESS_CARD, "sortie 1", "%", 0, 95);
-Card valdim2(&dashboard, PROGRESS_CARD, "sortie 2", "%", 0, 95);
+Card valdim1(&dashboard, PROGRESS_CARD, "Triac 1", "%", 0, 95);
+Card valdim2(&dashboard, PROGRESS_CARD, "Triac 2", "%", 0, 95);
 
 ////////////// Fin connexion wifi //////////
 
@@ -166,7 +173,8 @@ void setup() {
   Serial.println("Professeur Solaire Starting...");
   u8g2.begin();            // ECRAN OLED
   u8g2.enableUTF8Print();  //nécessaire pour écrire des caractères accentués
-  dimmer1.begin(NORMAL_MODE, ON);
+  dimmer1.begin(NORMAL_MODE, ON); /// Pourquoi y a pas le dimmer 2 ??????????????????????
+  dimmer1.setPower(0);
   WiFi.mode(WIFI_STA);  //Optional
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi...");
@@ -189,7 +197,6 @@ void setup() {
   pinMode(Relay1, OUTPUT);
   pinMode(Relay2, OUTPUT);
   initOTA();  // initialisation OTA Wifi
-
 
   // create a binary semaphore for task synchronization
   binsem1 = xSemaphoreCreateBinary();
@@ -292,6 +299,32 @@ void initOTA() {
 }
 
 
+void PrintDatas() {
+  Serial.print("Voltage: ");
+  Serial.println(Voltage);
+  Serial.print("Intensite1: ");
+  Serial.println(Intensite1);
+  Serial.print("Power1: ");
+  Serial.println(Power1);
+  Serial.print("Energy1: ");
+  Serial.println(Energy1);
+  Serial.print("Sens1: ");
+  Serial.println(Sens1);
+  Serial.print("Sens2: ");
+  Serial.println(Sens2);
+  Serial.print("Frequency: ");
+  Serial.println(Frequency);
+  Serial.print("Intensite2: ");
+  Serial.println(Intensite2);
+  Serial.print("Power2: ");
+  Serial.println(Power2);
+  Serial.print("Energy2: ");
+  Serial.println(Energy2);
+  Serial.print("Energy2C: ");
+  Serial.println(Energy2C);
+  Serial.print("ajustePuissance: ");
+  Serial.println(ajustePuissance);
+}
 
 // Lecture des données de puissance/courant
 void Datas() {
@@ -352,26 +385,30 @@ void Datas() {
 
 
   ///////// Normalisation des valeurs ///////////////
-
   Voltage = ByteData[1] * 0.0001;      // Tension
   Intensite1 = ByteData[2] * 0.0001;   // Intensité 1
-  Power1 = ByteData[3] * 0.0001;       // Puissance 1
+  Power1 = ByteData[3] * 0.0001 * CoefSimulation;       // Puissance 1
   Energy1 = ByteData[4] * 0.0001;      // Energie 1 surplus
   Sens1 = ByteData[7];                 // Sens 1
   Sens2 = ByteData[9];                 // Sens 2
   Frequency = ByteData[8] * 0.01;      // Fréquence
   Intensite2 = ByteData[10] * 0.0001;  // Intensité 2
-  Power2 = ByteData[11] * 0.0001;      // Puissance 2
+  Power2 = ByteData[11] * 0.0001 * CoefSimulation;      // Puissance 2
   Energy2 = ByteData[12] * 0.0001;     // Energie 2
   Energy2C = ByteData[14] * 0.0001;    // Energie 2 consommation
 
-  if (Sens2 == 1) {
+  if (Sens2 == 1) { // On produit
     ajustePuissance = -Power2;
   }
 
-  if (Sens2 == 0) {
+  if (Sens2 == 0) { // On Consomme
     ajustePuissance = Power2;
   }
+  Serial.print("Power1 : ");
+  Serial.print(Power1);
+  Serial.print(" / Power2=AjoustePuissance : ");
+  Serial.println(ajustePuissance);
+  //PrintDatas();
 }
 
 //programme utilisant le Core 1 de l'ESP32//
@@ -381,37 +418,16 @@ void Task1code(void *pvParameters) {
 
     currentTime = millis();
 
-    ///////////////////////////////////////////////////////////////////////////
-    if (Auto == 0) {
-      Datas();
-      digitalWrite(Relay2, HIGH);
-      valDim1 = 0;
-      dimmer1.setState(OFF);
-      dimmer1.setPower(valDim1);
-      valDim2 = 0;
-      dimmer2.setState(OFF);
-      dimmer2.setPower(valDim2);
-    }
-
-    if (marcheForceeVol == 1 && temps.getHours() == HOn && temps.getMinutes() == MnOn && temps.getSeconds() == SecOn && EnergyJ < energyNecessaireJ) {
-      Datas();
-      marcheForcee();
-    }
-
-    if (marcheForceeVol == 1 && temps.getHours() == HOff && temps.getMinutes() == MnOff && temps.getSeconds() == SecOff) {
-      TpsMarcheForcee = 0;
-      Auto = 1;
-    }
+    Auto = 1;
 
     if (Auto == 1) {
-      digitalWrite(Relay2, LOW);
       Datas();
 
       // calcul triacs ///
 
       /// injection ok ///
 
-      if (ajustePuissance < 0 && ajustePuissance > routagePuissance) {
+      if (ajustePuissance <= 0 && ajustePuissance >= routagePuissance) {
         puissanceRoutageOK = 1;
       } else {
         puissanceRoutageOK = 0;
@@ -462,11 +478,12 @@ void Task1code(void *pvParameters) {
       }
 
 
-
+      Serial.print("pas_dimmer: ");
+      Serial.print(pas_dimmer);
 
       // réglages Dimmer 1 ///
-
-      valDim1 = valDim1 + pas_dimmer;
+      if(valDim2 <= minDimmer) // seulement si Dimmer2 n'est pas en cours
+        valDim1 = valDim1 + pas_dimmer;
 
       if (valDim1 <= minDimmer) {
         dimmer1.setState(OFF);
@@ -501,13 +518,12 @@ void Task1code(void *pvParameters) {
           delay(60);
         }
 
-        else if (valDim2 >= maxDimmer) {
+        else if (valDim2 >= maxDimmer2) {
           dimmer2.setState(ON);
-          dimmer2.setPower(maxDimmer);
-          valDim2 = maxDimmer;
+          dimmer2.setPower(maxDimmer2);
+          valDim2 = maxDimmer2;
           delay(60);
         }
-
         else {
           dimmer2.setState(ON);
           dimmer2.setPower(valDim2);
@@ -522,24 +538,15 @@ void Task1code(void *pvParameters) {
         dimmer2.setState(OFF);
       }
 
+      Serial.print(" / valDim1: ");
+      Serial.print(valDim1);
+ 
+      Serial.print(" / valDim2: ");
+      Serial.println(valDim2);
 
 
-
-
-      // réglage relay sortie 3 actif au minimum 1 min //
-
-      if ((-ajustePuissance + Power1) > relayOn && (currentTime - previousTime1) > 60000) {
-        previousTime1 = currentTime;
-        digitalWrite(Relay1, HIGH);
-      }
-
-
-      if ((-ajustePuissance + Power1) < relayOff && (currentTime - previousTime1) > 60000) {
-        digitalWrite(Relay1, LOW);
-        previousTime1 = currentTime;
-      }
     }
-    delay(5000);
+    delay(2000);
   }
 }
 
@@ -603,7 +610,7 @@ void Task2code(void *pvParameters) {
 
     // affichage page web DASH //
 
-    consommationsurplus.update(ajustePuissance);
+    consommationsurplus.update(-ajustePuissance);
     puissance.update(Power1);
     energy1.update(Energy1);
     energy2C.update(Energy2);
@@ -661,91 +668,64 @@ void Task2code(void *pvParameters) {
 
     u8g2.clearBuffer();  // on efface ce qui se trouve déjà dans le buffer
     if (oled == 1) {
-      u8g2.setFont(u8g2_font_4x6_tf);
-      u8g2.setCursor(20, 10);     // position du début du texte
-      u8g2.print("Le Profes'S");  // écriture de texte
-      u8g2.setFont(u8g2_font_unifont_t_symbols);
-      u8g2.drawGlyph(65, 13, 0x2600);
-      u8g2.setFont(u8g2_font_4x6_tf);
-      u8g2.setCursor(76, 10);               // position du début du texte
-      u8g2.print("laire  v9.15");           // écriture de texte
-      u8g2.drawRFrame(5, 15, 120, 22, 11);  // rectangle x et y haut gauche / longueur / hauteur / arrondi //
-      u8g2.setFont(u8g2_font_5x7_tf);
-      u8g2.setCursor(20, 47);
+      u8g2.setFont(u8g2_font_6x13_tf);
+      u8g2.setCursor(0, 12);     // position du début du texte
+      u8g2.print("Util: ");  // écriture puisance utilisée
+      u8g2.print(Power1);
+      u8g2.print(" W");
+      u8g2.setCursor(0, 25);     // position du début du texte
+      u8g2.print("Inject: ");  // écriture puisance reseau
+      if(Sens2 == 0) {
+        u8g2.print("-");
+      }
+      u8g2.print(Power2);
+      u8g2.print(" W");
+
+      u8g2.setFont(u8g2_font_5x8_tf);
+      u8g2.setCursor(0, 34);
+      u8g2.print("T1: ");
+      u8g2.print((int)valDim1);
+      u8g2.print("% T2: ");
+      u8g2.print((int)valDim2);
+      u8g2.print("%");   
+
+      u8g2.setFont(u8g2_font_5x8_tf);
+      u8g2.setCursor(0, 50);
+      u8g2.print("IP: ");
       u8g2.print(WiFi.localIP());  // affichage adresse ip //
+   
+    
+      /// alternance kwh sauvés par jour vs total /////
 
-
-      if (Auto == 0) {
-
-        u8g2.setFont(u8g2_font_7x13B_tf);
-        u8g2.setCursor(30, 30);
-        u8g2.print("Marche forcée");
-        u8g2.setFont(u8g2_font_streamline_all_t);
-        u8g2.drawGlyph(5, 37, 0x00d9);
-        u8g2.setFont(u8g2_font_6x10_tf);
-        u8g2.setCursor(2, 64);
-        u8g2.print(temps.getFormattedTime());
-        if (TpsMarcheForcee > 0) {
-          u8g2.setCursor(57, 64);
-          u8g2.print("Fin : "), u8g2.print(HOff), u8g2.print("h");
-          u8g2.print(mn00Off);
-        }
-        u8g2.sendBuffer();  // l'image qu'on vient de construire est affichée à l'écran
-      }
-
-      if (Auto == 1) {
-        if (Power1 > 20) {
-          u8g2.setFont(u8g2_font_emoticons21_tr);
-          u8g2.drawGlyph(5, 37, 0x0036);
-        }
-
-        if (Power1 < 20) {
-          u8g2.setFont(u8g2_font_emoticons21_tr);
-          u8g2.drawGlyph(5, 37, 0x0026);
-        }
-
-
-        u8g2.setFont(u8g2_font_7x13B_tf);
-        u8g2.setCursor(60, 30);
-        u8g2.print(Power1);
-        u8g2.setCursor(110, 30);
-        u8g2.print("W");  // écriture de texte
+      if ((currentTime - previousTime3) < 2000) {
         u8g2.setFont(u8g2_font_4x6_tf);
-        u8g2.setCursor(10, 47);
-        u8g2.print(ajustePuissance);  // injection ou surplus //
-
-        /// alternance kwh sauvés par jour vs total /////
-
-        if ((currentTime - previousTime3) < 2000) {
-          u8g2.setFont(u8g2_font_4x6_tf);
-          u8g2.setCursor(10, 64);
-          u8g2.print("Sauvés J : ");  // écriture de texte
-          u8g2.setCursor(55, 64);
-          u8g2.setFont(u8g2_font_7x13B_tf);
-          u8g2.print(EnergyJ), u8g2.print("kWh");  // écriture de texte
-        }
-
-
-        if ((currentTime - previousTime3) >= 2000 && (currentTime - previousTime3) < 5000) {
-          u8g2.setFont(u8g2_font_4x6_tf);
-          u8g2.setCursor(10, 64);
-          u8g2.print("Sauvés T : ");  // écriture de texte
-          u8g2.setCursor(55, 64);
-          u8g2.setFont(u8g2_font_7x13B_tf);
-          u8g2.print(Energy1), u8g2.print("kWh");  // écriture de texte
-        }
-
-        if ((currentTime - previousTime3) >= 4000 && (currentTime - previousTime3) < 86400000) { previousTime3 = currentTime; }
-
-        u8g2.sendBuffer();  // l'image qu'on vient de construire est affichée à l'écran
+        u8g2.setCursor(10, 64);
+        u8g2.print("Sauvés J : ");  // écriture de texte
+        u8g2.setCursor(55, 64);
+        u8g2.setFont(u8g2_font_7x13B_tf);
+        u8g2.print(EnergyJ), u8g2.print("kWh");  // écriture de texte
       }
+
+      if ((currentTime - previousTime3) >= 2000 && (currentTime - previousTime3) < 5000) {
+        u8g2.setFont(u8g2_font_4x6_tf);
+        u8g2.setCursor(10, 64);
+        u8g2.print("Sauvés T : ");  // écriture de texte
+        u8g2.setCursor(55, 64);
+        u8g2.setFont(u8g2_font_7x13B_tf);
+        u8g2.print(Energy1), u8g2.print("kWh");  // écriture de texte
+      }
+
+      if ((currentTime - previousTime3) >= 4000 && (currentTime - previousTime3) < 86400000) { previousTime3 = currentTime; }
+
+      u8g2.sendBuffer();  // l'image qu'on vient de construire est affichée à l'écran
+    
     }
 
     if (oled == 0) {
       u8g2.clearBuffer();
       u8g2.sendBuffer();
     }
-    ////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////-//////////////////////////////
     ///////////////////////////// Fin affichage écran //////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////
