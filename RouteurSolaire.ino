@@ -39,14 +39,15 @@ const char* password = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx ";       // mot de passe d
 
 // Librairies //
 
-#include <HardwareSerial.h>     // https://github.com/espressif/arduino-esp32
+#include <HardwareSerial.h>     // https://github.com/espressif/arduino-esp32 // Board esp32 by Espressif 2.0.17
 #include <RBDdimmer.h>          // gestion des Dimmers  https://github.com/RobotDynOfficial/RBDDimmer // github
-#include <U8g2lib.h>            // gestion affichage écran Oled  https://github.com/olikraus/U8g2_Arduino/ //
-#include <Wire.h>               // pour esp-Dash
-#include <WiFi.h>               // gestion du wifi
-#include <ESPDash.h>            // page web Dash  https://github.com/ayushsharma82/ESP-DASH //
-#include <AsyncTCP.h>           //  https://github.com/me-no-dev/AsyncTCP  ///
-#include <ESPAsyncWebServer.h>  // https://github.com/me-no-dev/ESPAsyncWebServer  et https://github.com/bblanchon/ArduinoJson
+#include <U8g2lib.h>            // gestion affichage écran Oled  https://github.com/olikraus/U8g2_Arduino/ // lib U8g2 2.34.22
+#include <Wire.h>               // pour esp-Dash // dans Board esp32 by Espressif 2.0.17
+#include <WiFi.h>               // gestion du wifi // dans Board esp32 by Espressif 2.0.17
+#include <ESPDash.h>            // page web Dash  https://github.com/ayushsharma82/ESP-DASH // lib ESP-DASH 3.0.8
+#include <AsyncTCP.h>           //  https://github.com/me-no-dev/AsyncTCP  // lib AsyncTCP 3.1.4
+#include <ESPAsyncWebServer.h>  // https://github.com/me-no-dev/ESPAsyncWebServer  // git commit 7f3753454b1f176c4b6d6bcd1587a135d95ca63c
+                                // et https://github.com/bblanchon/ArduinoJson // lib ArduinoJson 7.1.00
 #include <ArduinoOTA.h>         // mise à jour OTA par wifi
 
 // Coefficient pour simuler des charges reeles avec des petites charges
@@ -70,9 +71,8 @@ U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
 //déclaration des variables//
 
 // pour le calcul de regulation
-float routagePuissance = -30; /* puissance minimale autour du zero */
+float puissacePresZero = -30; /* puissance minimale autour du zero */
 int ajustePuissance = 0;      /* Puissance a consommer par le balon (negatif: on doit consommer) */
-float puissanceRoutageOK;
 float pas_dimmer;
 float valDim = 0;             // somme des valeurs des dimmers
 float valDim1 = 0;
@@ -338,55 +338,46 @@ void Task1code(void *pvParameters) {
 
     // calcul triacs ///
 
-    /// injection ok ///
-    if (ajustePuissance <= 0 && ajustePuissance >= routagePuissance) {
-      puissanceRoutageOK = 1;
-    } else {
-      puissanceRoutageOK = 0;
-    }
-
-    /// réglages pas Dimmer ///
-
-    if (puissanceRoutageOK == 1) {
+    // Calcul de l'ajustement du pas de consigne
+    if (puissacePresZero <= ajustePuissance && ajustePuissance <= 0 ) {
       pas_dimmer = 0.0;
-    }
-
-    else if (ajustePuissance <= -1000 && puissanceRoutageOK == 0) {
-      pas_dimmer = 5.0;
-    } else if (ajustePuissance > -1000 && ajustePuissance <= -800 && puissanceRoutageOK == 0) {
-      pas_dimmer = 3.0;
-    } else if (ajustePuissance > -800 && ajustePuissance <= -400 && puissanceRoutageOK == 0) {
-      pas_dimmer = 2.0;
-    } else if (ajustePuissance > -400 && ajustePuissance <= -300 && puissanceRoutageOK == 0) {
-      pas_dimmer = 1.0;
-    } else if (ajustePuissance > -300 && ajustePuissance <= -200 && puissanceRoutageOK == 0) {
-      pas_dimmer = 0.75;
-    } else if (ajustePuissance > -200 && ajustePuissance <= -100 && puissanceRoutageOK == 0) {
-      pas_dimmer = 0.5;
-    } else if (ajustePuissance > -100 && ajustePuissance <= -50 && puissanceRoutageOK == 0) {
-      pas_dimmer = 0.1;
-    } else if (ajustePuissance > -50 && ajustePuissance <= routagePuissance && puissanceRoutageOK == 0) {
-      pas_dimmer = 0.05;
-    }
-
-    else if (ajustePuissance >= 1000 && puissanceRoutageOK == 0) {
-      pas_dimmer = -10.0;
-    } else if (ajustePuissance < 1000 && ajustePuissance >= 800 && puissanceRoutageOK == 0) {
-      pas_dimmer = -6.0;
-    } else if (ajustePuissance < 800 && ajustePuissance >= 400 && puissanceRoutageOK == 0) {
-      pas_dimmer = -4.0;
-    } else if (ajustePuissance < 400 && ajustePuissance >= 300 && puissanceRoutageOK == 0) {
-      pas_dimmer = -3.0;
-    } else if (ajustePuissance < 300 && ajustePuissance >= 200 && puissanceRoutageOK == 0) {
-      pas_dimmer = -2.0;
-    } else if (ajustePuissance < 200 && ajustePuissance >= 100 && puissanceRoutageOK == 0) {
-      pas_dimmer = -1.0;
-    } else if (ajustePuissance < 100 && ajustePuissance >= 50 && puissanceRoutageOK == 0) {
-      pas_dimmer = -0.5;
-    } else if (ajustePuissance < 50 && ajustePuissance >= 30 && puissanceRoutageOK == 0) {
-      pas_dimmer = -0.5;
-    } else if (ajustePuissance < 30 && ajustePuissance >= 1 && puissanceRoutageOK == 0) {
-      pas_dimmer = -0.1;
+    } else {
+      if (ajustePuissance <= -1000) {
+        pas_dimmer = 5.0;
+      } else if (-1000 < ajustePuissance && ajustePuissance <= -800) {
+        pas_dimmer = 3.0;
+      } else if (-800 < ajustePuissance && ajustePuissance <= -400) {
+        pas_dimmer = 2.0;
+      } else if ( -400 < ajustePuissance && ajustePuissance <= -300) {
+        pas_dimmer = 1.0;
+      } else if (-300 < ajustePuissance && ajustePuissance <= -200) {
+        pas_dimmer = 0.75;
+      } else if (-200 < ajustePuissance && ajustePuissance <= -100) {
+        pas_dimmer = 0.5;
+      } else if (-100 < ajustePuissance && ajustePuissance <= -50) {
+        pas_dimmer = 0.1;
+      } else if (-50 < ajustePuissance && ajustePuissance <= puissacePresZero) {
+        pas_dimmer = 0.05;
+      }
+      else if (ajustePuissance >= 1000) {
+        pas_dimmer = -10.0;
+      } else if (1000 > ajustePuissance  && ajustePuissance >= 800) {
+        pas_dimmer = -6.0;
+      } else if (800 > ajustePuissance && ajustePuissance >= 400) {
+        pas_dimmer = -4.0;
+      } else if (400 > ajustePuissance && ajustePuissance >= 300) {
+        pas_dimmer = -3.0;
+      } else if (300 > ajustePuissance && ajustePuissance >= 200) {
+        pas_dimmer = -2.0;
+      } else if (200 > ajustePuissance && ajustePuissance >= 100) {
+        pas_dimmer = -1.0;
+      } else if (100 > ajustePuissance && ajustePuissance >= 50) {
+        pas_dimmer = -0.5;
+      } else if (50 > ajustePuissance && ajustePuissance >= 30) {
+        pas_dimmer = -0.5;
+      } else if (30 > ajustePuissance && ajustePuissance >= 1) {
+        pas_dimmer = -0.1;
+      }
     }
 
     valDim = valDim + pas_dimmer;
