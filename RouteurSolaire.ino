@@ -83,7 +83,6 @@ const float maxDimmer1 = 100;
 const float maxDimmer2 = 97;
 const float minDimmer = 0;
 const float maxDimmers = maxDimmer1 + maxDimmer2;
-bool
 
 // Donnees de l'amperemetre
 float Voltage;                                         // Tension
@@ -147,6 +146,9 @@ void setup() {
   u8g2.enableUTF8Print();  //nécessaire pour écrire des caractères accentués
   dimmer1.begin(NORMAL_MODE, ON); /// Pourquoi y a pas le dimmer 2 , si 2eme dimmer, ca marche plus
   dimmer1.setPower(0);
+  dimmer2.setMode(NORMAL_MODE);
+
+  dimmer2.setPower(0);
   delay(100);
   WiFi.mode(WIFI_STA);  //Optional
   WiFi.begin(ssid, password);
@@ -386,12 +388,23 @@ void Task1code(void *pvParameters) {
 
     if(valDim1 == minDimmer) {
       dimmer1.setState(OFF);
-    } else {
+    }
+    else if(valDim1 == maxDimmer1) {
+      dimmer1.setMode(TOGGLE_MODE);
+      dimmer1.setState(ON);
+    }
+    else {
+      dimmer1.setMode(NORMAL_MODE);
       dimmer1.setState(ON);
     }
     if(valDim2 == minDimmer) {
       dimmer2.setState(OFF);
+    }
+    else if(valDim2 == maxDimmer2) {
+      dimmer2.setMode(TOGGLE_MODE);
+      dimmer2.setState(ON);
     } else {
+      dimmer2.setMode(NORMAL_MODE);
       dimmer2.setState(ON);
     }
     dimmer1.setPower(valDim1);
