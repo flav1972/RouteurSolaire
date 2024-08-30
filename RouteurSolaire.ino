@@ -1,6 +1,4 @@
 /* TODO
-** supression forcage par energie journaliere
-** mette a jour schema pour entre ZC du 2eme triac
 ** ajouter forcage par pin et forcage pour une duree
 ** ajouter mode AP + STA
 */
@@ -20,22 +18,13 @@ Merci à Jean-Victor pour l'idée d'optimisation de la gestion des Dimmers
 */
 
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////// CONFIGURATION ///// PARTIE A MODIFIER POUR VOTRE RESEAU //////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-#include "wifi_config.h"
 /*
-le fichichier wifi_config.h doit contenir les 2 lignes suivantes:
-const char* ssid = "xxxxxxxxxxxxx";                            // nom de votre réseau wifi
-const char* password = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx ";       // mot de passe de votre réseau wifi
+   Configuration de connexion sur le WiFi d'une box
+   créer le fichier wifi_config.h
+   qui doit contenir les 2 lignes suivantes:
+#define SSID  "xxxxxxxxxxxxx"                            // nom de votre réseau wifi
+#define PASSWORD  "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx "       // mot de passe de votre réseau wifi
 */
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
 
 // Librairies //
 
@@ -49,6 +38,13 @@ const char* password = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx ";       // mot de passe d
 #include <ESPAsyncWebServer.h>  // https://github.com/me-no-dev/ESPAsyncWebServer  // git commit 7f3753454b1f176c4b6d6bcd1587a135d95ca63c
                                 // et https://github.com/bblanchon/ArduinoJson // lib ArduinoJson 7.1.00
 #include <ArduinoOTA.h>         // mise à jour OTA par wifi
+#include <DNSServer.h>          // serveur DNS
+#if defined __has_include
+#  if __has_include ("wifi_config.h")
+#    include "wifi_config.h"
+#    define USESTA
+#  endif
+#endif
 
 // Coefficient pour simuler des charges reeles avec des petites charges
 #define CoefSimulation 60.0
@@ -56,6 +52,13 @@ const char* password = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx ";       // mot de passe d
 #ifndef CoefSimulation
 #define CoefSimulation 1.0
 #endif
+
+/*
+ * Configuration pour Wifi Mode STA
+ */
+/* Set these to your desired credentials. */
+const char *soft_ap_ssid_start = "SOLAR_";
+char soft_ap_ssid[15];
 
 // Adresse Ports Amperemetre
 #define RXD2 16
@@ -106,7 +109,12 @@ boolean oled = 1;                 // écran Oled allumé
 
 ///  configuration serveur web ///
 AsyncWebServer server(80);
-WiFiClient espClient;
+
+// Page pas trouvee envoye vers /
+void notFound(AsyncWebServerRequest *request) {
+      request->redirect("/");
+}
+
 ESPDash dashboard(&server);
 Card consommationsurplus(&dashboard, GENERIC_CARD, "Surplus (+=injection, -=conso)", "Watts");
 Card puissance(&dashboard, GENERIC_CARD, "Consumation Ballon+Planchers", "Watts");
@@ -117,7 +125,9 @@ Card Oled(&dashboard, BUTTON_CARD, "Écran On/Off");
 Card valdim1(&dashboard, PROGRESS_CARD, "Triac 1", "%", 0, 95);
 Card valdim2(&dashboard, PROGRESS_CARD, "Triac 2", "%", 0, 95);
 
-////////////// Fin connexion wifi //////////
+// DNS pour le mode AP
+DNSServer dnsServer;
+
 
 TaskHandle_t Task1;
 TaskHandle_t Task2;
@@ -142,6 +152,11 @@ void setup() {
   Serial2.begin(38400, SERIAL_8N1, RXD2, TXD2);  //PORT DE CONNEXION AVEC LE CAPTEUR JSY-MK-194
   delay(300);
   Serial.println("Routeur Solaire Starting...");
+  
+  Serial.printf("ESP32 Chip model = %s Rev %d\n", ESP.getChipModel(), ESP.getChipRevision());
+  Serial.printf("This chip has %d cores\n", ESP.getChipCores());
+  Serial.printf("SDK Version is : %s\n", esp_get_idf_version());
+  
   u8g2.begin();            // ECRAN OLED
   u8g2.enableUTF8Print();  //nécessaire pour écrire des caractères accentués
   dimmer1.begin(NORMAL_MODE, ON); /// Pourquoi y a pas le dimmer 2 , si 2eme dimmer, ca marche plus
@@ -150,8 +165,22 @@ void setup() {
 
   dimmer2.setPower(0);
   delay(100);
-  WiFi.mode(WIFI_STA);  //Optional
-  WiFi.begin(ssid, password);
+  uint64_t chip64 = ESP.getEfuseMac();           // recupere la MAC adresse (qui est a l envers)
+  uint32_t chipId = 0;
+  for (int i = 0; i < 17; i = i + 8) {               // retourne les 3 premiers octets
+    chipId |= ((chip64 >> (40 - i)) & 0xff) << i;
+  }
+  snprintf(soft_ap_ssid, 15, "%s%06X", soft_ap_ssid_start, chipId);
+  #ifdef USESTA
+  WiFi.mode(WIFI_MODE_APSTA);                    // Mode Acces Point et Station Wifi
+  #else
+  WiFi.mode(WIFI_MODE_AP);                       // Mode Acces Point
+  #endif
+  WiFi.softAP(soft_ap_ssid);                     // Configuration de l'acces point (sans mot de passe)
+  dnsServer.start(53, "*", WiFi.softAPIP());     // Lancement du serveur DNS
+
+  #ifdef USESTA
+  WiFi.begin(SSID, PASSWORD);
   Serial.print("Connecting to WiFi...");
   for (int i = 5; i >= 0; i--) {
     delay(1000);
@@ -166,6 +195,15 @@ void setup() {
   } else {
     Serial.println("Wifi STA not connected");
   }
+  #endif
+  
+  Serial.print("ESP32 IP as soft AP: ");
+  Serial.println(WiFi.softAPIP());
+ 
+  // configuration de la page web pas trouvee
+  server.onNotFound(notFound);
+
+  // lancement du serveur web
   server.begin();
   delay(100);
 
@@ -200,8 +238,8 @@ void setup() {
 // Programmation par OTA
 void initOTA() {
 
-  ArduinoOTA.setHostname("Profes'Solaire routeur");
-  ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
+  ArduinoOTA.setHostname(soft_ap_ssid);                           // SOLAR_XXXXXX comme pour le SSID AP
+  ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3"); // MD5 Hash of password
 
   ArduinoOTA
     .onStart([]() {
@@ -422,7 +460,8 @@ void Task1code(void *pvParameters) {
     Serial.print(" / valDim2: ");
     Serial.println(valDim2);
 
-    delay(500);
+    dnsServer.processNextRequest(); // On processe ici les requttes DNS
+    delay(200);                     // On boucle 5 fois par seconde
   }
 }
 
@@ -440,7 +479,7 @@ void Task2code(void *pvParameters) {
     //////////////////////////////////////////////////////////////////
     ///////////// Reconnexion wifi automatique ///////////////////////
     //////////////////////////////////////////////////////////////////
-
+    #ifdef USESTA
     if ((WiFi.status() != WL_CONNECTED) && (currentTimeTask2 - previousTimeWifi >= 60000)) {
       WiFi.disconnect();
       WiFi.reconnect();
@@ -450,6 +489,7 @@ void Task2code(void *pvParameters) {
       }
       previousTimeWifi = currentTimeTask2;
     }
+    #endif
 
     ///////////////////////////////////////////////////////////////////
     ////////////// Fin reconnexion automatique Wifi ///////////////////
@@ -496,12 +536,18 @@ void Task2code(void *pvParameters) {
       u8g2.print("% T2: ");
       u8g2.print((int)valDim2);
       u8g2.print("%");   
-
+      
+      #ifdef USESTA
       u8g2.setFont(u8g2_font_5x8_tf);
       u8g2.setCursor(0, 48);
       u8g2.print("IP: ");
       u8g2.print(WiFi.localIP());  // affichage adresse ip //
-   
+      #endif
+
+      u8g2.setFont(u8g2_font_5x8_tf);
+      u8g2.setCursor(0, 57);
+      u8g2.print("AP IP: ");
+      u8g2.print(WiFi.softAPIP());  // affichage adresse ip //
      
 
       u8g2.setFont(u8g2_font_5x8_tf);
