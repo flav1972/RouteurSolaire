@@ -61,8 +61,10 @@ const char* password = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx ";       // mot de passe d
 #define RXD2 16
 #define TXD2 17
 
-byte ByteArray[250];
-int ByteData[20];
+#define SER_BUF_SIZE 4096
+
+byte ByteArray[130]; // les donnees brutes du JSY
+long ByteData[14];   // les donnees converties du JSY
 
 U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
 
@@ -81,17 +83,18 @@ const float maxDimmer1 = 100;
 const float maxDimmer2 = 97;
 const float minDimmer = 0;
 const float maxDimmers = maxDimmer1 + maxDimmer2;
-
+bool
 
 // Donnees de l'amperemetre
 float Voltage;                                         // Tension
 float Intensite1;                                      // Courant dans le capteur sur la platine
-float Energy1;                                         // Energie totale passe dans le capteur 1
+float EnergyPos1;                                      // Energie totale (somme des positifs) passe dans le capteur 1
+float EnergyNeg1;                                      // Energie totale (somme des negatifs) passe dans le capteur 1
 float Frequency;                                       // Frequence
 float PowerFactor1;                                    // Facteur de puissance (dephasage enter I et V)
 float Intensite2;                                      // Intensite dans le capteur deporte
-float Energy2;                                         // Energie active passe dans le capteur 2 = energie injectee
-float Energy2C;                                        // Negative energy capteur 2 = consomation d'energie
+float EnergyPos2;                                      // Energie active passe dans le capteur 2 = energie injectee
+float EnergyNeg2;                                      // Negative energy capteur 2 = consomation d'energie
 float Sens1;                                           // Sens dans le capteur 1 : non utilise
 float Sens2;                                           // Sens dans le captuer 2 : 0 = on consomme, 1 = on produit
 int Power1;                                            // puissance envoyée au ballon + chauffages (capteur 1)
@@ -108,9 +111,9 @@ WiFiClient espClient;
 ESPDash dashboard(&server);
 Card consommationsurplus(&dashboard, GENERIC_CARD, "Surplus (+=injection, -=conso)", "Watts");
 Card puissance(&dashboard, GENERIC_CARD, "Consumation Ballon+Planchers", "Watts");
-Card energy1(&dashboard, GENERIC_CARD, "Energie sauvée totale", "kwh");
-Card energy2(&dashboard, GENERIC_CARD, "Energie injectée totale", "kwh");
-Card energy2C(&dashboard, GENERIC_CARD, "Consommation Enedis totale", "kWh");
+Card energieSauvee(&dashboard, GENERIC_CARD, "Energie sauvée totale", "kwh");
+Card energieInject(&dashboard, GENERIC_CARD, "Energie injectée totale", "kwh");
+Card energieConso(&dashboard, GENERIC_CARD, "Consommation Enedis totale", "kWh");
 Card Oled(&dashboard, BUTTON_CARD, "Écran On/Off");
 Card valdim1(&dashboard, PROGRESS_CARD, "Triac 1", "%", 0, 95);
 Card valdim2(&dashboard, PROGRESS_CARD, "Triac 2", "%", 0, 95);
@@ -136,6 +139,7 @@ void Task2code(void *);
 
 void setup() {
   Serial.begin(115200);
+  Serial2.setRxBufferSize(SER_BUF_SIZE);
   Serial2.begin(38400, SERIAL_8N1, RXD2, TXD2);  //PORT DE CONNEXION AVEC LE CAPTEUR JSY-MK-194
   delay(300);
   Serial.println("Routeur Solaire Starting...");
@@ -234,9 +238,11 @@ void PrintDatas() {
   Serial.print(Intensite1);
   Serial.print(", Power1: ");
   Serial.print(Power1);
-  Serial.print(", Energy1: ");
-  Serial.print(Energy1);
-  Serial.print(", Sens1: ");
+  Serial.print(", EnergyPos1: ");
+  Serial.print(EnergyPos1);
+  Serial.print(", EnergyNeg1: ");
+  Serial.println(EnergyNeg1);
+  Serial.print("Sens1: ");
   Serial.print(Sens1);
   Serial.print(", Sens2: ");
   Serial.print(Sens2);
@@ -246,22 +252,21 @@ void PrintDatas() {
   Serial.print(Intensite2);
   Serial.print(", Power2: ");
   Serial.print(Power2);
-  Serial.print(", Energy2: ");
-  Serial.print(Energy2);
-  Serial.print(", Energy2C: ");
-  Serial.print(Energy2C);
-  Serial.print(", ajustePuissance: ");
+  Serial.print(", EnergyPos2: ");
+  Serial.print(EnergyPos2);
+  Serial.print(", EnergyNeg2: ");
+  Serial.println(EnergyNeg2);
+  Serial.print("ajustePuissance: ");
   Serial.println(ajustePuissance);
 }
 
 // Lecture des données de puissance/courant
 void Datas() {
-  Serial.println("Read Amp Data");
-  vTaskDelay(60 / portTICK_PERIOD_MS);
-
+  int i, j;
   byte msg[] = { 0x01, 0x03, 0x00, 0x48, 0x00, 0x0E, 0x44, 0x18 };
-  int i;
   int len = 8;
+
+  Serial.println("Read Amp Data");
 
   ////// Envoie des requêtes Modbus RTU sur le Serial port 2
   for (i = 0; i < len; i++) {
@@ -276,55 +281,43 @@ void Datas() {
     a++;
   }
 
-  Serial.print("donnes recues:");
-  Serial.println(a);
-  ////////////////////////////////////////////////////////////////////////////////////////////////////
-
   if(a != 61) {
     Serial.println("donnees invalides");
     return;
   }
 
   //////// Conversion HEX /////////////////
-  ByteData[1] = ByteArray[3] * 16777216 + ByteArray[4] * 65536 + ByteArray[5] * 256 + ByteArray[6];       // Tension en Volts
-  ByteData[2] = ByteArray[7] * 16777216 + ByteArray[8] * 65536 + ByteArray[9] * 256 + ByteArray[10];      // Intensité 1 en Ampères
-  ByteData[3] = ByteArray[11] * 16777216 + ByteArray[12] * 65536 + ByteArray[13] * 256 + ByteArray[14];   // Puissance 1 en Watts
-  ByteData[4] = ByteArray[15] * 16777216 + ByteArray[16] * 65536 + ByteArray[17] * 256 + ByteArray[18];   // Energie 1 en kwh sauvées
-  ByteData[7] = ByteArray[27];                                                                            // sens 1 du courant
-  ByteData[9] = ByteArray[28];                                                                            // sens 2 du courant
-  ByteData[8] = ByteArray[31] * 16777216 + ByteArray[32] * 65536 + ByteArray[33] * 256 + ByteArray[34];   // Fréquence en hz
-  ByteData[10] = ByteArray[39] * 16777216 + ByteArray[40] * 65536 + ByteArray[41] * 256 + ByteArray[42];  // Intensité 2 en Ampères
-  ByteData[11] = ByteArray[43] * 16777216 + ByteArray[44] * 65536 + ByteArray[45] * 256 + ByteArray[46];  // Puissance 2 en Watts
-  ByteData[12] = ByteArray[47] * 16777216 + ByteArray[48] * 65536 + ByteArray[49] * 256 + ByteArray[50];  // Energie 2 en kwh injectee
-  ByteData[14] = ByteArray[55] * 16777216 + ByteArray[56] * 65536 + ByteArray[57] * 256 + ByteArray[58];  // Energie 2 en kwh consommation
-
-  ////////////////////////////////////////////////////////////////////////////////////////////////////
-
+  j = 3;
+  for (i = 0; i < 14; i++) {  // conversion séries de 4 octets en long
+    ByteData[i] = ByteArray[j++] << 24;
+    ByteData[i] += ByteArray[j++] << 16;
+    ByteData[i] += ByteArray[j++] << 8;
+    ByteData[i] += ByteArray[j++];
+  }
 
   ///////// Normalisation des valeurs ///////////////
-  Voltage = ByteData[1] * 0.0001;      // Tension
-  Intensite1 = ByteData[2] * 0.0001;   // Intensité 1
-  Power1 = ByteData[3] * 0.0001 * CoefSimulation;       // Puissance 1
-  Energy1 = ByteData[4] * 0.0001;      // Energie 1 : envoyee vers le balon et le chauffage
-  Sens1 = ByteData[7];                 // Sens 1
-  Sens2 = ByteData[9];                 // Sens 2
-  Frequency = ByteData[8] * 0.01;      // Fréquence
-  Intensite2 = ByteData[10] * 0.0001;  // Intensité 2
-  Power2 = ByteData[11] * 0.0001 * CoefSimulation;      // Puissance 2
-  Energy2 = ByteData[12] * 0.0001;     // Energie 2 positive (injectee)
-  Energy2C = ByteData[14] * 0.0001;    // Energie 2 negative (consommation)
+  #define OFFSETJSY -1
+  Voltage = ByteData[1+OFFSETJSY] * 0.0001;                       // Tension
+  Intensite1 = ByteData[2+OFFSETJSY] * 0.0001 * CoefSimulation;   // Intensité 1 en A
+  Power1 = ByteData[3+OFFSETJSY] * 0.0001 * CoefSimulation;       // Puissance 1 en W
+  EnergyPos1 = ByteData[4+OFFSETJSY] * 0.0001 * CoefSimulation;   // Energie 1 somme des Positifs: "produite" par le balon et le chauffage
+  EnergyNeg1 = ByteData[6+OFFSETJSY] * 0.0001 * CoefSimulation;   // Energie 1 somme des Negatifs: "consommee" par le balon et le chauffage
 
-  if (Sens2 == 1) { // On produit
+  Sens1 = ByteArray[27];  // Sens 1
+  Sens2 = ByteArray[28];
+  Frequency = ByteData[8+OFFSETJSY] * 0.01;                       // Fréquence en Hz
+  Intensite2 = ByteData[10+OFFSETJSY] * 0.0001 * CoefSimulation;  // Intensité 2 en A
+  Power2 = ByteData[11+OFFSETJSY] * 0.0001 * CoefSimulation;      // Puissance 2 en W
+  EnergyPos2 = ByteData[12+OFFSETJSY] * 0.0001 * CoefSimulation;  // Energie 2 positive (injectee) en Wh
+  EnergyNeg2 = ByteData[14+OFFSETJSY] * 0.0001 * CoefSimulation;  // Energie 2 negative (consommation) en Wh
+
+  if (Sens2 == 0) { // On produit
     ajustePuissance = -Power2;
   }
 
-  if (Sens2 == 0) { // On Consomme
+  if (Sens2 == 1) { // On Consomme
     ajustePuissance = Power2;
   }
-  Serial.print("Power1 : ");
-  Serial.print(Power1);
-  Serial.print(" / Power2=AjoustePuissance : ");
-  Serial.println(ajustePuissance);
   PrintDatas();
 }
 
@@ -453,9 +446,9 @@ void Task2code(void *pvParameters) {
     // affichage page web DASH //
     consommationsurplus.update(-ajustePuissance);
     puissance.update(Power1);
-    energy1.update(Energy1);
-    energy2.update(Energy2);
-    energy2C.update(Energy2C);
+    energieSauvee.update(EnergyNeg1-EnergyPos1);
+    energieInject.update(EnergyPos2);
+    energieConso.update(EnergyNeg2);
     valdim1.update(valDim1);
     valdim2.update(valDim2);
     Oled.update(oled);
@@ -476,19 +469,15 @@ void Task2code(void *pvParameters) {
     if (oled == 1) {
       u8g2.setFont(u8g2_font_6x13_tf);
       u8g2.setCursor(0, 12);     // position du début du texte
-      u8g2.print("Util: ");  // écriture puisance utilisée
+      u8g2.print("Balon: ");  // écriture puisance utilisée
       u8g2.print(Power1);
       u8g2.print(" W");
       u8g2.setCursor(0, 25);     // position du début du texte
       u8g2.print("Inject: ");  // écriture puisance reseau
-      if(Sens2 == 0) {
-        u8g2.print("-");
-      }
-      u8g2.print(Power2);
+      u8g2.print(-ajustePuissance);
       u8g2.print(" W");
 
-      u8g2.setFont(u8g2_font_5x8_tf);
-      u8g2.setCursor(0, 34);
+      u8g2.setCursor(0, 39);
       u8g2.print("T1: ");
       u8g2.print((int)valDim1);
       u8g2.print("% T2: ");
@@ -496,16 +485,16 @@ void Task2code(void *pvParameters) {
       u8g2.print("%");   
 
       u8g2.setFont(u8g2_font_5x8_tf);
-      u8g2.setCursor(0, 50);
+      u8g2.setCursor(0, 48);
       u8g2.print("IP: ");
       u8g2.print(WiFi.localIP());  // affichage adresse ip //
    
      
 
-      u8g2.setFont(u8g2_font_4x6_tf);
-      u8g2.setCursor(0, 64);
+      u8g2.setFont(u8g2_font_5x8_tf);
+      u8g2.setCursor(0, 63);
       u8g2.print("Energie sauvee : ");  // écriture de texte
-      u8g2.print(Energy1), u8g2.print(" kWh");  // écriture de texte
+      u8g2.print(EnergyNeg1), u8g2.print(" kWh");  // écriture de texte
       
       u8g2.sendBuffer();  // l'image qu'on vient de construire est affichée à l'écran
     }
