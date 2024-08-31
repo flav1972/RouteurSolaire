@@ -1,20 +1,8 @@
-/* TODO
-** ajouter forcage par pin et forcage pour une duree
-** ajouter mode AP + STA
-*/
+/* 
+  Routeur solaire d'après la version développé par le Profes'Solaire v9.15 - 28-11-2023 - professolaire@gmail.com
 
-/* Routeur solaire développé par le Profes'Solaire v9.15 - 28-11-2023 - professolaire@gmail.com
-Merci à Jean-Victor pour l'idée d'optimisation de la gestion des Dimmers
-- 2 sorties 16A / 3000 watts
-- 1 relais on/off
-- 1 serveur web Dash Lite avec On / Off
-- heure NTP
-- relay marche forcée : 16A mini
-- marche forcée automatique suivant surplus et par rapport au volume ballon
-- marche forcée automatique avec sonde de température : 50 degrés min
-- mise à jour OTA en wifi
- * ESP32 + JSY-MK-194 (16 et 17) + Dimmer1 24A-600V (35 ZC et 25 PW) + Dimmer 2 24A-600V ( 35 ZC et 26 PW) + écran Oled (22 : SCK et 21 SDA) + relay (13) + relay marche forcée (32) + sonde température DS18B20 (4)
- Utilisation des 2 Cores de l'Esp32
+  TODO
+  ajouter forcage par pin et forcage pour une duree
 */
 
 
@@ -26,19 +14,18 @@ Merci à Jean-Victor pour l'idée d'optimisation de la gestion des Dimmers
 #define PASSWORD  "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx "       // mot de passe de votre réseau wifi
 */
 
-// Librairies //
-
-#include <HardwareSerial.h>     // https://github.com/espressif/arduino-esp32 // Board esp32 by Espressif 2.0.17
-#include <RBDdimmer.h>          // gestion des Dimmers  https://github.com/RobotDynOfficial/RBDDimmer // github
-#include <U8g2lib.h>            // gestion affichage écran Oled  https://github.com/olikraus/U8g2_Arduino/ // lib U8g2 2.34.22
-#include <Wire.h>               // pour esp-Dash // dans Board esp32 by Espressif 2.0.17
-#include <WiFi.h>               // gestion du wifi // dans Board esp32 by Espressif 2.0.17
-#include <ESPDash.h>            // page web Dash  https://github.com/ayushsharma82/ESP-DASH // lib ESP-DASH 3.0.8
-#include <AsyncTCP.h>           //  https://github.com/me-no-dev/AsyncTCP  // lib AsyncTCP 3.1.4
-#include <ESPAsyncWebServer.h>  // https://github.com/me-no-dev/ESPAsyncWebServer  // git commit 7f3753454b1f176c4b6d6bcd1587a135d95ca63c
-                                // et https://github.com/bblanchon/ArduinoJson // lib ArduinoJson 7.1.00
-#include <ArduinoOTA.h>         // mise à jour OTA par wifi
-#include <DNSServer.h>          // serveur DNS
+// Librairies (voir Readme)
+#include <HardwareSerial.h>     // 2nd Port Serie- dans Board esp32 by Espressif 2.0.17
+#include <RBDdimmer.h>          // gestion des Dimmers:  https://github.com/flav1972/RBDDimmer - github tag 1.1
+#include <U8g2lib.h>            // gestion affichage écran Oled:  https://github.com/olikraus/U8g2_Arduino/ - lib U8g2 2.34.22
+#include <Wire.h>               // pour connexion au bus I2C (écran) - dans Board esp32 by Espressif 2.0.17
+#include <WiFi.h>               // gestion du wifi - dans Board esp32 by Espressif 2.0.17
+#include <ESPDash.h>            // page web Dash:  https://github.com/ayushsharma82/ESP-DASH - lib ESP-DASH 3.0.8
+#include <AsyncTCP.h>           // pour ESPAsyncWebserver: https://github.com/me-no-dev/AsyncTCP  - lib AsyncTCP 3.1.4
+#include <ESPAsyncWebServer.h>  // pour serveur web: https://github.com/me-no-dev/ESPAsyncWebServer  - git commit 7f3753454b1f176c4b6d6bcd1587a135d95ca63c
+                                // et https://github.com/bblanchon/ArduinoJson - lib ArduinoJson 7.1.00
+#include <ArduinoOTA.h>         // mise à jour OTA par wifi - dans Board esp32 by Espressif 2.0.17
+#include <DNSServer.h>          // serveur DNS - dans Board esp32 by Espressif 2.0.17
 #if defined __has_include
 #  if __has_include ("wifi_config.h")
 #    include "wifi_config.h"
