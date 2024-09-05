@@ -47,6 +47,12 @@
 const char *soft_ap_ssid_start = "SOLAR_";
 char soft_ap_ssid[15];
 
+/* Broches utilisées */
+const int zeroCrossPin = 35; /* broche utilisée pour le zéro crossing */
+const int pulsePin1 = 25;    /* broche impulsions routage 1*/
+const int pulsePin2 = 26;    /* broche impulsions routage 2*/
+const int forcagePin = 34;   // broche pour forcer la mache: 3.3v = forcage
+
 // Adresse Ports Amperemetre
 #define RXD2 16
 #define TXD2 17
@@ -92,7 +98,10 @@ int Power2;                                            // puissance entrant ou s
 unsigned long currentTimeTask1 = 0;                    // temps actuel dans la tache1
 unsigned long currentTimeTask2 = 0;                    // temps actuel dans la tache2
 unsigned long previousTimeWifi = 0;                    // variable temps pour reconnexion wifi
-boolean oled = 1;                 // écran Oled allumé
+
+boolean lastmarcheforceepin;      // statut marche par le pin : forcage off au depart
+boolean marcheforcee = 0;         // statut marche : forcage off au depart
+boolean oled = 1;                 // statut écran Oled : allumé au depart
 
 ///  configuration serveur web ///
 AsyncWebServer server(80);
@@ -108,30 +117,29 @@ Card puissance(&dashboard, GENERIC_CARD, "Consumation Ballon+Planchers", "Watts"
 Card energieSauvee(&dashboard, GENERIC_CARD, "Energie sauvée totale", "kwh");
 Card energieInject(&dashboard, GENERIC_CARD, "Energie injectée totale", "kwh");
 Card energieConso(&dashboard, GENERIC_CARD, "Consommation Enedis totale", "kWh");
-Card Oled(&dashboard, BUTTON_CARD, "Écran On/Off");
 Card valdim1(&dashboard, PROGRESS_CARD, "Triac 1", "%", 0, 95);
 Card valdim2(&dashboard, PROGRESS_CARD, "Triac 2", "%", 0, 95);
+Card BOled(&dashboard, BUTTON_CARD, "Écran On/Off");
+Card Bmarcheforcee(&dashboard, BUTTON_CARD, "Marche forcée On/Off");
 
 // DNS pour le mode AP
 DNSServer dnsServer;
 
-
+// tache loop
 TaskHandle_t Task1;
 TaskHandle_t Task2;
 SemaphoreHandle_t binsem1;
 
-/* Broches utilisées */
-const int zeroCrossPin = 35; /* broche utilisée pour le zéro crossing */
-const int pulsePin1 = 25;    /* broche impulsions routage 1*/
-const int pulsePin2 = 26;    /* broche impulsions routage 2*/
-const int oneWireBus = 4;    // broche du capteur DS18B20 //
+// prototype fonctions attachées aux taches
+void Task1code(void *);
+void Task2code(void *);
 
+// dimmer
 dimmerLamp dimmer1(pulsePin1, zeroCrossPin);
 dimmerLamp dimmer2(pulsePin2, zeroCrossPin);
 
-void initOTA();  // déclaré plus bas
-void Task1code(void *);
-void Task2code(void *);
+// prototype fonction pour la programmation par le WiFi
+void initOTA(); 
 
 void setup() {
   Serial.begin(115200);
@@ -144,6 +152,9 @@ void setup() {
   Serial.printf("This chip has %d cores\n", ESP.getChipCores());
   Serial.printf("SDK Version is : %s\n", esp_get_idf_version());
   
+  pinMode(forcagePin, INPUT_PULLDOWN);          // pin marche forcee en Input et ressistance pulldown
+  marcheforcee = lastmarcheforceepin = digitalRead(forcagePin);
+
   u8g2.begin();            // ECRAN OLED
   u8g2.enableUTF8Print();  //nécessaire pour écrire des caractères accentués
   dimmer1.begin(NORMAL_MODE, ON); /// Pourquoi y a pas le dimmer 2 , si 2eme dimmer, ca marche plus
@@ -195,6 +206,20 @@ void setup() {
   delay(100);
 
   initOTA();  // initialisation OTA Wifi
+
+  // Boutons ESP-DASH interactifs
+  BOled.attachCallback([&](bool value) {
+    oled = value;
+    BOled.update(oled);
+    dashboard.sendUpdates();
+  });
+
+  Bmarcheforcee.attachCallback([&](bool value) {
+    marcheforcee = value;
+    Bmarcheforcee.update(oled);
+    dashboard.sendUpdates();
+  });
+
 
   // create a binary semaphore for task synchronization
   binsem1 = xSemaphoreCreateBinary();
@@ -351,6 +376,7 @@ void Datas() {
 //programme utilisant le Core 1 de l'ESP32//
 
 void Task1code(void *pvParameters) {
+  int mfpin;
   for (;;) {
     currentTimeTask1 = millis();
 
@@ -409,6 +435,19 @@ void Task1code(void *pvParameters) {
     }
 
     valDim1 = min(valDim, maxDimmer1);
+
+    // gestion de la marche forcee
+    mfpin = digitalRead(forcagePin);
+    if(mfpin != lastmarcheforceepin) {
+      marcheforcee = lastmarcheforceepin = mfpin;
+    }
+
+    if(marcheforcee) {
+      Serial.println("Marche Forcee");
+      valDim1 = maxDimmer1;
+    }
+
+    // dimmer 2
     valDim2 = max(minDimmer, valDim - maxDimmer1);
 
     if(valDim1 == minDimmer) {
@@ -491,15 +530,10 @@ void Task2code(void *pvParameters) {
     energieConso.update(EnergyNeg2);
     valdim1.update(valDim1);
     valdim2.update(valDim2);
-    Oled.update(oled);
+    BOled.update(oled);
+    Bmarcheforcee.update(marcheforcee);
     vTaskDelay(60 / portTICK_PERIOD_MS);
     dashboard.sendUpdates();
-
-    Oled.attachCallback([&](bool value) {
-      oled = value;
-      Oled.update(oled);
-      dashboard.sendUpdates();
-    });
 
     ////////////////////////////////////////////////////////////////////////////
     //////////////////////////// affichage écran ///////////////////////////////
