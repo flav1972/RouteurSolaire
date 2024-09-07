@@ -67,6 +67,7 @@ U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
 
 
 //déclaration des variables//
+float Kp = 0.0;
 
 // pour le calcul de regulation
 float puissacePresZero = -30; /* puissance minimale autour du zero */
@@ -200,6 +201,10 @@ void setup() {
  
   // configuration de la page web pas trouvee
   server.onNotFound(notFound);
+  
+  // Attachement de pages web
+  server.on("/datas", HTTP_GET, handleDataRequest);
+  server.on("/pid", HTTP_GET, handlePIDRequest);
 
   // lancement du serveur web
   server.begin();
@@ -246,6 +251,29 @@ void setup() {
     1);        /* pin task to core 1 */
   delay(500);
 }
+
+// Gestion requetteweb
+void handleDataRequest(AsyncWebServerRequest *request) {
+    AsyncResponseStream *response = request->beginResponseStream("text/plain");
+    response->print("Routeur Solaire\n");
+    response->printf("Vous avez essaye de joindre la page: http://%s%s\n", request->host().c_str(), request->url().c_str());
+    response->printf("ajustePuissance = %d\n", ajustePuissance);
+    response->printf("valDim = %f\n", valDim);
+    response->printf("Kp = %f\n", Kp);
+    request->send(response);
+}
+
+const char* KP_PARAM = "kp";
+void handlePIDRequest(AsyncWebServerRequest *request) {
+        String kpstring;
+        if (request->hasParam(KP_PARAM)) {
+            kpstring = request->getParam(KP_PARAM)->value();
+            Kp = kpstring.toFloat();
+        } else {
+            kpstring = "No message sent";
+        }
+        request->send(200, "text/plain", "Hello, GET: " + kpstring);
+    }
 
 // Programmation par OTA
 void initOTA() {
