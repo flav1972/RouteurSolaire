@@ -65,13 +65,15 @@ long ByteData[14];   // les donnees converties du JSY
 U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
 
 
-
-//déclaration des variables//
-float Kp = 0.0;
+//déclaration des variables
+// pour le calcul de regulation
+float Kp = 0.01;
+float Ki = 0.00001; //0.0001;  //0.0005;
+float Kd = -2.0; // -1.0; //-2;
 
 // pour le calcul de regulation
 float puissacePresZero = -30; /* puissance minimale autour du zero */
-int ajustePuissance = 0;      /* Puissance a consommer par le balon (negatif: on doit consommer) */
+int erreurPuissance = 0;      /* puissance consomme par le balon - puissance produite = +/- power2 = - puissance injectee*/
 float pas_dimmer;
 float valDim = 0;             // somme des valeurs des dimmers
 float valDim1 = 0;
@@ -80,6 +82,9 @@ const float maxDimmer1 = 100;
 const float maxDimmer2 = 97;
 const float minDimmer = 0;
 const float maxDimmers = maxDimmer1 + maxDimmer2;
+unsigned long durationCalc = 0;   // delta temps
+float sumError = 0.0;
+float lastError = 0.0;
 
 // Donnees de l'amperemetre
 float Voltage;                                         // Tension
@@ -91,10 +96,10 @@ float PowerFactor1;                                    // Facteur de puissance (
 float Intensite2;                                      // Intensite dans le capteur deporte
 float EnergyPos2;                                      // Energie active passe dans le capteur 2 = energie injectee
 float EnergyNeg2;                                      // Negative energy capteur 2 = consomation d'energie
-float Sens1;                                           // Sens dans le capteur 1 : non utilise
-float Sens2;                                           // Sens dans le captuer 2 : 0 = on consomme, 1 = on produit
-int Power1;                                            // puissance envoyée au ballon + chauffages (capteur 1)
-int Power2;                                            // puissance entrant ou sortant de l'habitation
+int Sens1;                                           // Sens dans le capteur 1 : non utilise
+int Sens2;                                           // Sens dans le captuer 2 : 0 = on consomme, 1 = on produit
+float Power1;                                            // puissance envoyée au ballon + chauffages (capteur 1)
+float Power2;                                            // puissance entrant ou sortant de l'habitation
 
 unsigned long currentTimeTask1 = 0;                    // temps actuel dans la tache1
 unsigned long currentTimeTask2 = 0;                    // temps actuel dans la tache2
@@ -254,26 +259,50 @@ void setup() {
 
 // Gestion requetteweb
 void handleDataRequest(AsyncWebServerRequest *request) {
-    AsyncResponseStream *response = request->beginResponseStream("text/plain");
-    response->print("Routeur Solaire\n");
-    response->printf("Vous avez essaye de joindre la page: http://%s%s\n", request->host().c_str(), request->url().c_str());
-    response->printf("ajustePuissance = %d\n", ajustePuissance);
-    response->printf("valDim = %f\n", valDim);
-    response->printf("Kp = %f\n", Kp);
-    request->send(response);
+  AsyncResponseStream *response = request->beginResponseStream("text/plain");
+  response->print("Routeur Solaire\n");
+  response->printf("Vous avez essaye de joindre la page: http://%s%s\n", request->host().c_str(), request->url().c_str());
+  response->printf("erreurPuissance = %d\n", erreurPuissance);
+  response->printf("valDim = %f\n", valDim);
+  response->printf("Kp = %f\n", Kp);
+  response->printf("Ki = %f\n", Ki);
+  response->printf("Kd= %f\n", Kd);
+  response->printf("Voltage = %f\n", Voltage);
+  response->printf("Intensite1 = %f\n", Intensite1);
+  response->printf("Power1 = %f\n", Power1);
+  response->printf("EnergyPos1 = %f\n", EnergyPos1);
+  response->printf("EnergyNeg1 = %f\n", EnergyNeg1);
+  response->printf("Sens1 = %d\n", Sens1);
+  response->printf("Sens2 = %d\n", Sens2);
+  response->printf("Frequency = %f\n", Frequency);
+  response->printf("Intensite2 = %f\n", Intensite2);
+  response->printf("Power2 = %f\n", Power2);
+  response->printf("EnergyPos2 = %f\n", EnergyPos2);
+  response->printf("EnergyNeg2 = %f\n", EnergyNeg2);
+  response->printf("erreurPuissance= %f\n", erreurPuissance);
+  request->send(response);
 }
 
+// Mise à jour des parametres PID par http
 const char* KP_PARAM = "kp";
+const char* KI_PARAM = "ki";
+const char* KD_PARAM = "kd";
 void handlePIDRequest(AsyncWebServerRequest *request) {
-        String kpstring;
-        if (request->hasParam(KP_PARAM)) {
-            kpstring = request->getParam(KP_PARAM)->value();
-            Kp = kpstring.toFloat();
-        } else {
-            kpstring = "No message sent";
-        }
-        request->send(200, "text/plain", "Hello, GET: " + kpstring);
-    }
+  String string;
+  if (request->hasParam(KP_PARAM)) {
+      string = request->getParam(KP_PARAM)->value();
+      Kp = string.toFloat();
+  }
+  if (request->hasParam(KI_PARAM)) {
+      string = request->getParam(KI_PARAM)->value();
+      Ki = string.toFloat();
+  }
+  if (request->hasParam(KD_PARAM)) {
+      string = request->getParam(KD_PARAM)->value();
+      Kd = string.toFloat();
+  }
+  request->send(200, "text/plain", "Hello, GET K values :\nKp=" + String(Kp) + "\nKi=" + String(Ki)+ "\nKd=" + String(Kd));
+}
 
 // Programmation par OTA
 void initOTA() {
@@ -336,8 +365,8 @@ void PrintDatas() {
   Serial.print(EnergyPos2);
   Serial.print(", EnergyNeg2: ");
   Serial.println(EnergyNeg2);
-  Serial.print("ajustePuissance: ");
-  Serial.println(ajustePuissance);
+  Serial.print("erreurPuissance: ");
+  Serial.println(erreurPuissance);
 }
 
 // Lecture des données de puissance/courant
@@ -348,11 +377,18 @@ void Datas() {
 
   Serial.println("Read Amp Data");
 
+  // vide le buffer
+  while (Serial2.available()) {
+    Serial2.read();
+  }
+
   ////// Envoie des requêtes Modbus RTU sur le Serial port 2
   for (i = 0; i < len; i++) {
     Serial2.write(msg[i]);
   }
   ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+  delay(50); // une petite pause pour attendre l'arrivée des données
 
   ////////// Reception  des données Modbus RTU venant du capteur JSY-MK-194 ////////////////////////
   int a = 0;
@@ -392,11 +428,11 @@ void Datas() {
   EnergyNeg2 = ByteData[14+OFFSETJSY] * 0.0001 * CoefSimulation;  // Energie 2 negative (consommation) en Wh
 
   if (Sens2 == 0) { // On produit
-    ajustePuissance = -Power2;
+    erreurPuissance = -Power2;
   }
 
   if (Sens2 == 1) { // On Consomme
-    ajustePuissance = Power2;
+    erreurPuissance = Power2;
   }
   PrintDatas();
 }
@@ -413,43 +449,43 @@ void Task1code(void *pvParameters) {
     // calcul triacs ///
 
     // Calcul de l'ajustement du pas de consigne
-    if (puissacePresZero <= ajustePuissance && ajustePuissance <= 0 ) {
+    if (puissacePresZero <= erreurPuissance && erreurPuissance <= 0 ) {
       pas_dimmer = 0.0;
     } else {
-      if (ajustePuissance <= -1000) {
+      if (erreurPuissance <= -1000) {
         pas_dimmer = 5.0;
-      } else if (-1000 < ajustePuissance && ajustePuissance <= -800) {
+      } else if (-1000 < erreurPuissance && erreurPuissance <= -800) {
         pas_dimmer = 3.0;
-      } else if (-800 < ajustePuissance && ajustePuissance <= -400) {
+      } else if (-800 < erreurPuissance && erreurPuissance <= -400) {
         pas_dimmer = 2.0;
-      } else if ( -400 < ajustePuissance && ajustePuissance <= -300) {
+      } else if ( -400 < erreurPuissance && erreurPuissance <= -300) {
         pas_dimmer = 1.0;
-      } else if (-300 < ajustePuissance && ajustePuissance <= -200) {
+      } else if (-300 < erreurPuissance && erreurPuissance <= -200) {
         pas_dimmer = 0.75;
-      } else if (-200 < ajustePuissance && ajustePuissance <= -100) {
+      } else if (-200 < erreurPuissance && erreurPuissance <= -100) {
         pas_dimmer = 0.5;
-      } else if (-100 < ajustePuissance && ajustePuissance <= -50) {
+      } else if (-100 < erreurPuissance && erreurPuissance <= -50) {
         pas_dimmer = 0.1;
-      } else if (-50 < ajustePuissance && ajustePuissance <= puissacePresZero) {
+      } else if (-50 < erreurPuissance && erreurPuissance <= puissacePresZero) {
         pas_dimmer = 0.05;
       }
-      else if (ajustePuissance >= 1000) {
+      else if (erreurPuissance >= 1000) {
         pas_dimmer = -10.0;
-      } else if (1000 > ajustePuissance  && ajustePuissance >= 800) {
+      } else if (1000 > erreurPuissance  && erreurPuissance >= 800) {
         pas_dimmer = -6.0;
-      } else if (800 > ajustePuissance && ajustePuissance >= 400) {
+      } else if (800 > erreurPuissance && erreurPuissance >= 400) {
         pas_dimmer = -4.0;
-      } else if (400 > ajustePuissance && ajustePuissance >= 300) {
+      } else if (400 > erreurPuissance && erreurPuissance >= 300) {
         pas_dimmer = -3.0;
-      } else if (300 > ajustePuissance && ajustePuissance >= 200) {
+      } else if (300 > erreurPuissance && erreurPuissance >= 200) {
         pas_dimmer = -2.0;
-      } else if (200 > ajustePuissance && ajustePuissance >= 100) {
+      } else if (200 > erreurPuissance && erreurPuissance >= 100) {
         pas_dimmer = -1.0;
-      } else if (100 > ajustePuissance && ajustePuissance >= 50) {
+      } else if (100 > erreurPuissance && erreurPuissance >= 50) {
         pas_dimmer = -0.5;
-      } else if (50 > ajustePuissance && ajustePuissance >= 30) {
+      } else if (50 > erreurPuissance && erreurPuissance >= 30) {
         pas_dimmer = -0.5;
-      } else if (30 > ajustePuissance && ajustePuissance >= 1) {
+      } else if (30 > erreurPuissance && erreurPuissance >= 1) {
         pas_dimmer = -0.1;
       }
     }
@@ -551,7 +587,7 @@ void Task2code(void *pvParameters) {
 
 
     // affichage page web DASH //
-    consommationsurplus.update(-ajustePuissance);
+    consommationsurplus.update(-erreurPuissance);
     puissance.update(Power1);
     energieSauvee.update(EnergyNeg1-EnergyPos1);
     energieInject.update(EnergyPos2);
@@ -576,7 +612,7 @@ void Task2code(void *pvParameters) {
       u8g2.print(" W");
       u8g2.setCursor(0, 25);     // position du début du texte
       u8g2.print("Inject: ");  // écriture puisance reseau
-      u8g2.print(-ajustePuissance);
+      u8g2.print(-erreurPuissance);
       u8g2.print(" W");
 
       u8g2.setCursor(0, 39);
