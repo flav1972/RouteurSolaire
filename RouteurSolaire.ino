@@ -34,7 +34,7 @@
 #endif
 
 // Coefficient pour simuler des charges reeles avec des petites charges
-#define CoefSimulation 60.0
+//#define CoefSimulation 60.0
 
 #ifndef CoefSimulation
 #define CoefSimulation 1.0
