@@ -67,9 +67,9 @@ U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
 
 //déclaration des variables
 // pour le calcul de regulation
-float Kp = 0.01;
-float Ki = 0.00001; //0.0001;  //0.0005;
-float Kd = -2.0; // -1.0; //-2;
+float Kp = 1000;
+float Ki = 0.01; //0.0001;  //0.0005;
+float Kd = 0.005; // -1.0; //-2;
 
 // pour le calcul de regulation
 float puissacePresZero = -30; /* puissance minimale autour du zero */
@@ -287,6 +287,7 @@ void handleDataRequest(AsyncWebServerRequest *request) {
 const char* KP_PARAM = "kp";
 const char* KI_PARAM = "ki";
 const char* KD_PARAM = "kd";
+char buff[100];
 void handlePIDRequest(AsyncWebServerRequest *request) {
   String string;
   if (request->hasParam(KP_PARAM)) {
@@ -301,7 +302,8 @@ void handlePIDRequest(AsyncWebServerRequest *request) {
       string = request->getParam(KD_PARAM)->value();
       Kd = string.toFloat();
   }
-  request->send(200, "text/plain", "Hello, GET K values :\nKp=" + String(Kp) + "\nKi=" + String(Ki)+ "\nKd=" + String(Kd));
+  snprintf(buff, sizeof(buff), "Hello, GET K values : Kp=%f, Ki=%f, Kd=%f", Kp, Ki, Kd);
+  request->send(200, "text/plain", buff);
 }
 
 // Programmation par OTA
@@ -341,32 +343,36 @@ void initOTA() {
 
 
 void PrintDatas() {
-  Serial.print("Voltage: ");
+  /*
+  Serial.print("Voltage:");
   Serial.print(Voltage);
-  Serial.print(", Intensite1: ");
+  Serial.print(",Intensite1:");
   Serial.print(Intensite1);
-  Serial.print(", Power1: ");
+  */
+  Serial.print("Power1:");
   Serial.print(Power1);
-  Serial.print(", EnergyPos1: ");
+  /*
+  Serial.print(",EnergyPos1:");
   Serial.print(EnergyPos1);
-  Serial.print(", EnergyNeg1: ");
-  Serial.println(EnergyNeg1);
-  Serial.print("Sens1: ");
+  Serial.print(",EnergyNeg1:");
+  Serial.print(EnergyNeg1);
+  Serial.print(",Sens1:");
   Serial.print(Sens1);
-  Serial.print(", Sens2: ");
+  Serial.print(",Sens2:");
   Serial.print(Sens2);
-  Serial.print(", Frequency: ");
+  Serial.print(",Frequency:");
   Serial.print(Frequency);
-  Serial.print(", Intensite2: ");
+  Serial.print(",Intensite2:");
   Serial.print(Intensite2);
-  Serial.print(", Power2: ");
+  Serial.print(",Power2:");
   Serial.print(Power2);
-  Serial.print(", EnergyPos2: ");
+  Serial.print(",EnergyPos2:");
   Serial.print(EnergyPos2);
-  Serial.print(", EnergyNeg2: ");
-  Serial.println(EnergyNeg2);
-  Serial.print("erreurPuissance: ");
-  Serial.println(erreurPuissance);
+  Serial.print(",EnergyNeg2:");
+  Serial.print(EnergyNeg2);
+  */
+  Serial.print(",erreurPuissance:");
+  Serial.print(erreurPuissance);
 }
 
 // Lecture des données de puissance/courant
@@ -449,10 +455,15 @@ void Task1code(void *pvParameters) {
     // calcul triacs ///
 
     // Calcul de l'ajustement du pas de consigne
+    
+    /*
     if (puissacePresZero <= erreurPuissance && erreurPuissance <= 0 ) {
       pas_dimmer = 0.0;
     } else {
-      if (erreurPuissance <= -1000) {
+      if (erreurPuissance <= -2000) {
+        pas_dimmer = 20.0;
+      }
+      else if (erreurPuissance <= -1000) {
         pas_dimmer = 5.0;
       } else if (-1000 < erreurPuissance && erreurPuissance <= -800) {
         pas_dimmer = 3.0;
@@ -488,6 +499,13 @@ void Task1code(void *pvParameters) {
       } else if (30 > erreurPuissance && erreurPuissance >= 1) {
         pas_dimmer = -0.1;
       }
+    }
+    */
+    if(Power2 >= Kp) {
+       pas_dimmer = - Ki * erreurPuissance;
+    }
+    else {
+       pas_dimmer = - Kd * erreurPuissance;
     }
 
     valDim = valDim + pas_dimmer;
@@ -541,13 +559,16 @@ void Task1code(void *pvParameters) {
     delay(60);
 
 
-    Serial.print("pas_dimmer: ");
+    Serial.print(",pas_dimmer:");
     Serial.print(pas_dimmer);
 
-    Serial.print(" / valDim1: ");
+    Serial.print(",valDim:");
+    Serial.print(valDim);
+
+    Serial.print(",valDim1:");
     Serial.print(valDim1);
 
-    Serial.print(" / valDim2: ");
+    Serial.print(",valDim2:");
     Serial.println(valDim2);
 
     dnsServer.processNextRequest(); // On processe ici les requttes DNS
