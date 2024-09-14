@@ -4,6 +4,16 @@ d'après https://sites.google.com/view/le-professolaire/routeur-professolaire
 
 avec la version Profes'Solaire v9.15 - 28-11-2023 - professolaire@gmail.com
 
+## URLs pour la Configuration
+
+### affichage de toutes les datas
+
+http://adresse/datas
+
+### mise à jour des coeficients du PID
+
+http://adresse/pid?kp=0.0&ki=0.004&kd=-5
+
 ## Description
 - à base de ESP32 en utilisant les 2 coeurs du CPU
 - contrôle 2 dimmers (on peut mettre plusieurs dimmers en parallèle sur chaque sortie si besoin)
@@ -133,7 +143,6 @@ Lorsque le mode simulation est actif, les calculs et affichages sont faits avec 
 
 # Compléments
 ## TODO
-* forçage du premier dimmer à 100%
 * utilisation d'un module RTC pour remettre à zéro la somme des énergies
 
 ## Versions des libraries utilisées remontées par le build

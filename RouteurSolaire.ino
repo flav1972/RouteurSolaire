@@ -67,24 +67,23 @@ U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE);
 
 //déclaration des variables
 // pour le calcul de regulation
-float Kp = 1000;
-float Ki = 0.01; //0.0001;  //0.0005;
-float Kd = 0.005; // -1.0; //-2;
+float Kp = 0;
+float Ki = 0.004; 
+float Kd = -5;
 
 // pour le calcul de regulation
-float puissacePresZero = -30; /* puissance minimale autour du zero */
-int erreurPuissance = 0;      /* puissance consomme par le balon - puissance produite = +/- power2 = - puissance injectee*/
+float ajusteConso = 0.0;        // puissance consomme par le balon - puissance produite = +/- power2 = - puissance injectee*/
+float ajusteConso_n1 = 0.0;     // valeur en n-1
+float ajusteConso_n2 = 0.0;     // valeur en n-2
 float pas_dimmer;
-float valDim = 0;             // somme des valeurs des dimmers
-float valDim1 = 0;
-float valDim2 = 0;
-const float maxDimmer1 = 100;
-const float maxDimmer2 = 97;
-const float minDimmer = 0;
-const float maxDimmers = maxDimmer1 + maxDimmer2;
-unsigned long durationCalc = 0;   // delta temps
-float sumError = 0.0;
-float lastError = 0.0;
+float valDim = 0.0;             // somme des valeurs des dimmers
+float valDim1 = 0.0;
+float valDim2 = 0.0;
+const float maxDimmer1 = 97.0;  // Forcage à 100% au dela de cette valeur pour eviter les clignottements
+const float maxDimmer2 = 97.0;  // Forcage à 100% au dela de cette valeur pour eviter les clignottements
+const float minDimmer = 0.0;
+const float maxDimmers = 100.0 + maxDimmer2;
+
 
 // Donnees de l'amperemetre
 float Voltage;                                         // Tension
@@ -102,8 +101,10 @@ float Power1;                                            // puissance envoyée a
 float Power2;                                            // puissance entrant ou sortant de l'habitation
 
 unsigned long currentTimeTask1 = 0;                    // temps actuel dans la tache1
+unsigned long previousTimeTask1 = 0;                   // temps precedent dans la tache1
+
 unsigned long currentTimeTask2 = 0;                    // temps actuel dans la tache2
-unsigned long previousTimeWifi = 0;                    // variable temps pour reconnexion wifi
+unsigned long previousTimeWifi = 0;                    // temps de la derniere tentative de reconnexion wifi
 
 boolean lastmarcheforceepin;      // statut marche par le pin : forcage off au depart
 boolean marcheforcee = 0;         // statut marche : forcage off au depart
@@ -262,7 +263,7 @@ void handleDataRequest(AsyncWebServerRequest *request) {
   AsyncResponseStream *response = request->beginResponseStream("text/plain");
   response->print("Routeur Solaire\n");
   response->printf("Vous avez essaye de joindre la page: http://%s%s\n", request->host().c_str(), request->url().c_str());
-  response->printf("erreurPuissance = %d\n", erreurPuissance);
+  response->printf("ajusteConso = %d\n", ajusteConso);
   response->printf("valDim = %f\n", valDim);
   response->printf("Kp = %f\n", Kp);
   response->printf("Ki = %f\n", Ki);
@@ -279,7 +280,7 @@ void handleDataRequest(AsyncWebServerRequest *request) {
   response->printf("Power2 = %f\n", Power2);
   response->printf("EnergyPos2 = %f\n", EnergyPos2);
   response->printf("EnergyNeg2 = %f\n", EnergyNeg2);
-  response->printf("erreurPuissance= %f\n", erreurPuissance);
+  response->printf("ajusteConso= %f\n", ajusteConso);
   request->send(response);
 }
 
@@ -371,8 +372,8 @@ void PrintDatas() {
   Serial.print(",EnergyNeg2:");
   Serial.print(EnergyNeg2);
   */
-  Serial.print(",erreurPuissance:");
-  Serial.print(erreurPuissance);
+  Serial.print(",ajusteConso:");
+  Serial.print(ajusteConso);
 }
 
 // Lecture des données de puissance/courant
@@ -381,7 +382,7 @@ void Datas() {
   byte msg[] = { 0x01, 0x03, 0x00, 0x48, 0x00, 0x0E, 0x44, 0x18 };
   int len = 8;
 
-  Serial.println("Read Amp Data");
+  //Serial.println("Read Amp Data");
 
   // vide le buffer
   while (Serial2.available()) {
@@ -434,11 +435,11 @@ void Datas() {
   EnergyNeg2 = ByteData[14+OFFSETJSY] * 0.0001 * CoefSimulation;  // Energie 2 negative (consommation) en Wh
 
   if (Sens2 == 0) { // On produit
-    erreurPuissance = -Power2;
+    ajusteConso = Power2;
   }
 
   if (Sens2 == 1) { // On Consomme
-    erreurPuissance = Power2;
+    ajusteConso = -Power2;
   }
   PrintDatas();
 }
@@ -446,67 +447,41 @@ void Datas() {
 //programme utilisant le Core 1 de l'ESP32//
 
 void Task1code(void *pvParameters) {
-  int mfpin;
+  int mfpin;  // pour la lecture du pin de marche forcee
+
+  unsigned long durationCalc_n = 0;    // delta temps du calcul courant
+  unsigned long durationCalc_n_1 = 0;  // delta temps du calcul precedent
+
+  // PID fonction :
+  // E est l'erreur
+  // d_commande[n] = (Ki + Kp/dt + Kd/dt2) * E[n] + (-Kp/dt-2*Kd/dt2) * E[n-1] + Kd/dt2*E[n-2]
+  float Kd_factor; // facteur dependant de Kd/dt (derivée)
+  float Kp_factor; // facteur dependant de Kp/dt2 (derivée seconde)
   for (;;) {
     currentTimeTask1 = millis();
+    durationCalc_n_1 = durationCalc_n;
+    durationCalc_n =  currentTimeTask1 - previousTimeTask1;
+    previousTimeTask1 = currentTimeTask1;
 
     Datas();
 
-    // calcul triacs ///
-
-    // Calcul de l'ajustement du pas de consigne
-    
-    /*
-    if (puissacePresZero <= erreurPuissance && erreurPuissance <= 0 ) {
-      pas_dimmer = 0.0;
-    } else {
-      if (erreurPuissance <= -2000) {
-        pas_dimmer = 20.0;
-      }
-      else if (erreurPuissance <= -1000) {
-        pas_dimmer = 5.0;
-      } else if (-1000 < erreurPuissance && erreurPuissance <= -800) {
-        pas_dimmer = 3.0;
-      } else if (-800 < erreurPuissance && erreurPuissance <= -400) {
-        pas_dimmer = 2.0;
-      } else if ( -400 < erreurPuissance && erreurPuissance <= -300) {
-        pas_dimmer = 1.0;
-      } else if (-300 < erreurPuissance && erreurPuissance <= -200) {
-        pas_dimmer = 0.75;
-      } else if (-200 < erreurPuissance && erreurPuissance <= -100) {
-        pas_dimmer = 0.5;
-      } else if (-100 < erreurPuissance && erreurPuissance <= -50) {
-        pas_dimmer = 0.1;
-      } else if (-50 < erreurPuissance && erreurPuissance <= puissacePresZero) {
-        pas_dimmer = 0.05;
-      }
-      else if (erreurPuissance >= 1000) {
-        pas_dimmer = -10.0;
-      } else if (1000 > erreurPuissance  && erreurPuissance >= 800) {
-        pas_dimmer = -6.0;
-      } else if (800 > erreurPuissance && erreurPuissance >= 400) {
-        pas_dimmer = -4.0;
-      } else if (400 > erreurPuissance && erreurPuissance >= 300) {
-        pas_dimmer = -3.0;
-      } else if (300 > erreurPuissance && erreurPuissance >= 200) {
-        pas_dimmer = -2.0;
-      } else if (200 > erreurPuissance && erreurPuissance >= 100) {
-        pas_dimmer = -1.0;
-      } else if (100 > erreurPuissance && erreurPuissance >= 50) {
-        pas_dimmer = -0.5;
-      } else if (50 > erreurPuissance && erreurPuissance >= 30) {
-        pas_dimmer = -0.5;
-      } else if (30 > erreurPuissance && erreurPuissance >= 1) {
-        pas_dimmer = -0.1;
-      }
-    }
-    */
-    if(Power2 >= Kp) {
-       pas_dimmer = - Ki * erreurPuissance;
+    if (durationCalc_n == 0 || Kp == 0.0) {
+      Kp_factor = 0.0;  
     }
     else {
-       pas_dimmer = - Kd * erreurPuissance;
+      Kp_factor = Kp / float(durationCalc_n); 
     }
+
+    if (durationCalc_n == 0 || durationCalc_n_1 == 0) {
+      Kd_factor = 0.0;  
+    }
+    else {
+      Kd_factor = Kd / float(durationCalc_n * durationCalc_n_1); 
+    }
+    pas_dimmer = (Ki + Kp_factor + Kd_factor)*ajusteConso - (Kp_factor + 2*Kd_factor)*ajusteConso_n1 + Kd_factor*ajusteConso_n2;
+    
+    ajusteConso_n2 = ajusteConso_n1;
+    ajusteConso_n1 = ajusteConso;
 
     valDim = valDim + pas_dimmer;
     if (valDim > maxDimmers) {
@@ -516,7 +491,7 @@ void Task1code(void *pvParameters) {
       valDim = minDimmer;
     }
 
-    valDim1 = min(valDim, maxDimmer1);
+    valDim1 = min(valDim, (float)100.0);
 
     // gestion de la marche forcee
     mfpin = digitalRead(forcagePin);
@@ -526,16 +501,16 @@ void Task1code(void *pvParameters) {
 
     if(marcheforcee) {
       Serial.println("Marche Forcee");
-      valDim1 = maxDimmer1;
+      valDim1 = 100.0;
     }
 
     // dimmer 2
-    valDim2 = max(minDimmer, valDim - maxDimmer1);
+    valDim2 = max(minDimmer, valDim - (float)100.0);
 
     if(valDim1 == minDimmer) {
       dimmer1.setState(OFF);
     }
-    else if(valDim1 == maxDimmer1) {
+    else if(valDim1 >= maxDimmer1) {
       dimmer1.setMode(TOGGLE_MODE);
       dimmer1.setState(ON);
     }
@@ -543,6 +518,7 @@ void Task1code(void *pvParameters) {
       dimmer1.setMode(NORMAL_MODE);
       dimmer1.setState(ON);
     }
+
     if(valDim2 == minDimmer) {
       dimmer2.setState(OFF);
     }
@@ -553,14 +529,14 @@ void Task1code(void *pvParameters) {
       dimmer2.setMode(NORMAL_MODE);
       dimmer2.setState(ON);
     }
+
     dimmer1.setPower(valDim1);
     delay(60);
     dimmer2.setPower(valDim2);
     delay(60);
 
-
     Serial.print(",pas_dimmer:");
-    Serial.print(pas_dimmer);
+    Serial.print(pas_dimmer, 3);
 
     Serial.print(",valDim:");
     Serial.print(valDim);
@@ -572,7 +548,7 @@ void Task1code(void *pvParameters) {
     Serial.println(valDim2);
 
     dnsServer.processNextRequest(); // On processe ici les requttes DNS
-    delay(200);                     // On boucle 5 fois par seconde
+    delay(200);                     // On boucle 5 fois par seconde environ
   }
 }
 
@@ -608,7 +584,7 @@ void Task2code(void *pvParameters) {
 
 
     // affichage page web DASH //
-    consommationsurplus.update(-erreurPuissance);
+    consommationsurplus.update(-ajusteConso);
     puissance.update(Power1);
     energieSauvee.update(EnergyNeg1-EnergyPos1);
     energieInject.update(EnergyPos2);
@@ -633,7 +609,7 @@ void Task2code(void *pvParameters) {
       u8g2.print(" W");
       u8g2.setCursor(0, 25);     // position du début du texte
       u8g2.print("Inject: ");  // écriture puisance reseau
-      u8g2.print(-erreurPuissance);
+      u8g2.print(-ajusteConso);
       u8g2.print(" W");
 
       u8g2.setCursor(0, 39);
@@ -668,7 +644,7 @@ void Task2code(void *pvParameters) {
       u8g2.clearBuffer();
       u8g2.sendBuffer();
     }
-    //////////////////////////////////////////////////////-//////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////
     ///////////////////////////// Fin affichage écran //////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////////////
