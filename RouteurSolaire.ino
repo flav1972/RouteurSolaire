@@ -82,7 +82,8 @@ float valDim2 = 0.0;
 const float maxDimmer1 = 97.0;  // Forcage à 100% au dela de cette valeur pour eviter les clignottements
 const float maxDimmer2 = 97.0;  // Forcage à 100% au dela de cette valeur pour eviter les clignottements
 const float minDimmer = 0.0;
-const float maxDimmers = 100.0 + maxDimmer2;
+const float maxDimmer = 100.0;  // Valeur theorique maximale d'un dimmer
+const float maxDimmers = 2 * maxDimmer;
 
 
 // Donnees de l'amperemetre
@@ -491,7 +492,7 @@ void Task1code(void *pvParameters) {
       valDim = minDimmer;
     }
 
-    valDim1 = min(valDim, (float)100.0);
+    valDim1 = min(valDim, maxDimmer);
 
     // gestion de la marche forcee
     mfpin = digitalRead(forcagePin);
@@ -501,11 +502,11 @@ void Task1code(void *pvParameters) {
 
     if(marcheforcee) {
       Serial.println("Marche Forcee");
-      valDim1 = 100.0;
+      valDim1 = maxDimmer;
     }
 
     // dimmer 2
-    valDim2 = max(minDimmer, valDim - (float)100.0);
+    valDim2 = max(minDimmer, valDim - maxDimmer);
 
     if(valDim1 == minDimmer) {
       dimmer1.setState(OFF);
@@ -522,7 +523,7 @@ void Task1code(void *pvParameters) {
     if(valDim2 == minDimmer) {
       dimmer2.setState(OFF);
     }
-    else if(valDim2 == maxDimmer2) {
+    else if(valDim2 >= maxDimmer2) {
       dimmer2.setMode(TOGGLE_MODE);
       dimmer2.setState(ON);
     } else {
@@ -584,7 +585,7 @@ void Task2code(void *pvParameters) {
 
 
     // affichage page web DASH //
-    consommationsurplus.update(-ajusteConso);
+    consommationsurplus.update(ajusteConso);
     puissance.update(Power1);
     energieSauvee.update(EnergyNeg1-EnergyPos1);
     energieInject.update(EnergyPos2);
@@ -603,13 +604,13 @@ void Task2code(void *pvParameters) {
     u8g2.clearBuffer();  // on efface ce qui se trouve déjà dans le buffer
     if (oled == 1) {
       u8g2.setFont(u8g2_font_6x13_tf);
-      u8g2.setCursor(0, 12);     // position du début du texte
-      u8g2.print("Balon: ");  // écriture puisance utilisée
+      u8g2.setCursor(0, 12);      // position du début du texte
+      u8g2.print("P Triacs: ");   // écriture puisance utilisée
       u8g2.print(Power1);
       u8g2.print(" W");
-      u8g2.setCursor(0, 25);     // position du début du texte
-      u8g2.print("Inject: ");  // écriture puisance reseau
-      u8g2.print(-ajusteConso);
+      u8g2.setCursor(0, 25);      // position du début du texte
+      u8g2.print("Injection: ");  // écriture puisance reseau
+      u8g2.print(ajusteConso);
       u8g2.print(" W");
 
       u8g2.setCursor(0, 39);
