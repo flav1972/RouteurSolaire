@@ -635,8 +635,8 @@ void Task2code(void *pvParameters) {
 
       u8g2.setFont(u8g2_font_5x8_tf);
       u8g2.setCursor(0, 63);
-      u8g2.print("Energie sauvee : ");  // écriture de texte
-      u8g2.print(EnergyNeg1), u8g2.print(" kWh");  // écriture de texte
+      u8g2.print("kWh sauves: ");  // écriture de texte
+      u8g2.print(EnergyNeg1);  // écriture de texte
       
       u8g2.sendBuffer();  // l'image qu'on vient de construire est affichée à l'écran
     }
